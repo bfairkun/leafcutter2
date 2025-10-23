@@ -602,6 +602,33 @@ def addlowusage(options):
     fout.close()
 
 
+def get_sample_name(junc_line, default_path):
+    """Extract sample name from junction file line or construct default"""
+    parts = junc_line.strip().split('\t')
+    
+    if len(parts) >= 2 and parts[1].strip():
+        # Use provided sample name from second column
+        return parts[1].strip()
+    else:
+        # Construct default sample name from file path
+        filepath = parts[0].strip()
+        
+        # Try parent directory approach first (for /path/sample/file.junc structure)
+        parent_dir = os.path.basename(os.path.dirname(filepath))
+        if parent_dir and parent_dir not in ['.', '/', '']:
+            sample_name = parent_dir
+        else:
+            # Fall back to filename approach
+            sample_name = os.path.basename(filepath)
+        
+        # Clean up common extensions
+        for ext in ['.junc.gz', '.junc', '.gz']:
+            if sample_name.endswith(ext):
+                sample_name = sample_name[:-len(ext)]
+                break
+        
+        return sample_name
+
 def sort_junctions(libl, options):
     """Sort junctions by cluster
 
@@ -671,37 +698,36 @@ def sort_junctions(libl, options):
                 cluExons[cluN] = []
             cluExons[cluN].append((chrom, A, B))
 
-    merges = {}  # stores junc file names as dict { k=filename : v=[filename] }
+    merges = {}  # stores junc file names as dict { k=sample_name : v=[filepath] }
     for ll in libl:
-        lib = ll.rstrip()  # 1 junc file path
-        libN = lib.split("/")[
-            -1
-        ]  # get library name from junc file name eg. GTEX-1117F-0226-SM-5GZZ7.tsv.gz
-        if not os.path.isfile(lib):
+        filepath = ll.split('\t')[0].rstrip()  # Get just the filepath part
+        sample_name = get_sample_name(ll, filepath)
+        
+        if not os.path.isfile(filepath):
             continue
-        if libN not in merges:
-            merges[libN] = []  # why use list, `libN` should always be one element
-        merges[libN].append(lib)
+        if sample_name not in merges:
+            merges[sample_name] = []
+        merges[sample_name].append(filepath)
 
     fout_runlibs = open(
         os.path.join(rundir, outPrefix) + "_sortedlibs", "w"
     )  # intermediate file to store sorted junc file names to be written
 
-    # operate on each libN (library), each libN can have more than 1+ junc files
-    for libN in merges:
+    # operate on each sample_name (library), each sample_name can have more than 1+ junc files
+    for sample_name in merges:
         by_chrom = {}  # to store junctions from original unsorted junc file
 
         # write sorted junc file names into intermediate file
         foutName = os.path.join(
-            rundir, outPrefix + "_" + libN + ".junc.sorted.gz"
+            rundir, outPrefix + "_" + sample_name + ".junc.sorted.gz"
         )  # 'test/gtex_w_clu/gtex_GTEX-1IDJU-0006-SM-CMKFK.junc.sorted.gz'
         fout_runlibs.write(foutName + "\n")  # e.g. 'test/gtex_w_clu/gtex_sortedlibs'
 
         if options.verbose:
-            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Sorting {libN}..\n")
-        if len(merges[libN]) > 1:
+            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Sorting {sample_name}..\n")
+        if len(merges[sample_name]) > 1:
             if options.verbose:
-                sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {' '.join(merges[libN])}...\n")
+                sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {' '.join(merges[sample_name])}...\n")
         else:
             pass
         fout = gzip.open(
@@ -711,11 +737,11 @@ def sort_junctions(libl, options):
         # -------- Process and write junction files --------
 
         # write header
-        fout.write(f"chrom {libN}\n")  # 'chrom GTEX-111VG-0526-SM-5N9BW\n'
+        fout.write(f"chrom {sample_name}\n")  # 'chrom GTEX-111VG-0526-SM-5N9BW\n'
 
         # -------- Gather counts from all junc files of library --------
         # store in by_chrom: { ('chr1', '+') : { (100, 300) : 5, (500, 700): 10, ... } }
-        for lib in merges[libN]:
+        for lib in merges[sample_name]:
             if ".gz" in lib:
                 F = gzip.open(lib)
             else:
@@ -1190,6 +1216,9 @@ def annotate_noisy(options):
     ln = F.readline().decode()
     foutdiag.write(ln)
     foutdiagnumers.write(ln)
+    
+    # Get number of samples from header line (subtract 1 for the 'chrom' column)
+    num_samples = len(ln.split()) - 1
 
     N_introns_annotated = 0
     N_skipped_introns = 0
@@ -1211,10 +1240,13 @@ def annotate_noisy(options):
         fractions = [x.split("/") for x in ln[1:]]
         usages = [int(f[0]) / (float(f[1]) + 0.1) for f in fractions] # intron usage ratios
         reads = [int(f[0]) for f in fractions]  # numerators
-        sdreads = stdev(reads)  # standard deviation of read counts across samples
+        if num_samples > 1:
+            sdreads = stdev(reads)  # standard deviation of read counts across samples
+        else:
+            sdreads = 0
 
-        # remove intron if read count SD < 0.5 and usage ratios are all 0
-        if sum(usages) == 0 or sdreads < minreadstd:
+        # remove intron if read count SD < minreadstd (only when multiple samples) and usage ratios are all 0
+        if sum(usages) == 0 or (sdreads < minreadstd and num_samples > 1):
             N_skipped_introns += 1
             continue
 
@@ -1500,16 +1532,23 @@ if __name__ == "__main__":
         sys.stderr.write("Error: no junction file provided...\n")
         exit(0)
 
-    # Get the junction file list
+    # Get the junction file list with optional sample names
     libl = []
-    for junc in open(options.juncfiles):
-        junc = junc.strip()
+    for line in open(options.juncfiles):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+            
+        # Split on tab to handle optional second column
+        parts = line.split('\t')
+        filepath = parts[0].strip()
+        
         try:
-            open(junc)
+            open(filepath)
         except:
-            sys.stderr.write(f"{junc} does not exist... check your junction files.\n")
+            sys.stderr.write(f"{filepath} does not exist... check your junction files.\n")
             exit(0)
-        libl.append(junc)
+        libl.append(line)  # Keep the full line (with optional sample name)
 
     chromLst = (
         [f"chr{x}" for x in range(1, 23)]
