@@ -629,6 +629,26 @@ def get_sample_name(junc_line, default_path):
         
         return sample_name
 
+def get_sample_name_from_line(line):
+    """Extract sample name from junction file line"""
+    parts = line.strip().split('\t')
+    filepath = parts[0].strip()
+    
+    if len(parts) >= 2 and parts[1].strip():
+        # Use provided sample name from second column
+        return parts[1].strip(), filepath
+    else:
+        # Use basename approach
+        basename = os.path.basename(filepath)
+        
+        # Remove common file extensions
+        for ext in ['.junc.gz', '.bed.gz', '.junc', '.bed', '.gz']:
+            if basename.endswith(ext):
+                basename = basename[:-len(ext)]
+                break
+        
+        return basename, filepath
+
 def sort_junctions(libl, options):
     """Sort junctions by cluster
 
@@ -699,12 +719,13 @@ def sort_junctions(libl, options):
             cluExons[cluN].append((chrom, A, B))
 
     merges = {}  # stores junc file names as dict { k=sample_name : v=[filepath] }
-    for ll in libl:
-        filepath = ll.split('\t')[0].rstrip()  # Get just the filepath part
-        sample_name = get_sample_name(ll, filepath)
+
+    for line in libl:
+        sample_name, filepath = get_sample_name_from_line(line)
         
         if not os.path.isfile(filepath):
             continue
+            
         if sample_name not in merges:
             merges[sample_name] = []
         merges[sample_name].append(filepath)
@@ -1534,20 +1555,20 @@ if __name__ == "__main__":
 
     # Get the junction file list with optional sample names
     libl = []
-    for line in open(options.juncfiles):
+    for line_num, line in enumerate(open(options.juncfiles), 1):
         line = line.strip()
         if not line or line.startswith('#'):
             continue
-            
-        # Split on tab to handle optional second column
-        parts = line.split('\t')
-        filepath = parts[0].strip()
+        
+        # Extract filepath for validation
+        filepath = line.split('\t')[0].strip()
         
         try:
             open(filepath)
         except:
-            sys.stderr.write(f"{filepath} does not exist... check your junction files.\n")
+            sys.stderr.write(f"Error on line {line_num}: {filepath} does not exist... check your junction files.\n")
             exit(0)
+        
         libl.append(line)  # Keep the full line (with optional sample name)
 
     chromLst = (
