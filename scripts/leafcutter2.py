@@ -12,7 +12,7 @@ import re
 import shutil
 import sys
 import tempfile
-from statistics import mean, median, stdev
+from statistics import stdev
 from datetime import datetime
 
 import ForwardSpliceJunctionClassifier as sjcf
@@ -113,7 +113,6 @@ def pool_junc_reads(flist, options):
     return
         No returns. Use side effects.
 
-
     Side-effects:
     -------------
     write introns and counts by clusters. Output file is NOT versions sorted.
@@ -137,7 +136,9 @@ def pool_junc_reads(flist, options):
     by_chrom = {}  # { k=(chrom, strand) : v={ k=(start, end) : v=reads } }
 
     for libl in flist:
-        lib = libl.strip()
+        # FIX: Extract only the filepath part, ignoring sample name
+        lib = libl.strip().split('\t')[0].strip()
+        
         if not os.path.isfile(lib):
             continue
 
@@ -601,33 +602,6 @@ def addlowusage(options):
         fout.write(buf + "\n")
     fout.close()
 
-
-def get_sample_name(junc_line, default_path):
-    """Extract sample name from junction file line or construct default"""
-    parts = junc_line.strip().split('\t')
-    
-    if len(parts) >= 2 and parts[1].strip():
-        # Use provided sample name from second column
-        return parts[1].strip()
-    else:
-        # Construct default sample name from file path
-        filepath = parts[0].strip()
-        
-        # Try parent directory approach first (for /path/sample/file.junc structure)
-        parent_dir = os.path.basename(os.path.dirname(filepath))
-        if parent_dir and parent_dir not in ['.', '/', '']:
-            sample_name = parent_dir
-        else:
-            # Fall back to filename approach
-            sample_name = os.path.basename(filepath)
-        
-        # Clean up common extensions
-        for ext in ['.junc.gz', '.junc', '.gz']:
-            if sample_name.endswith(ext):
-                sample_name = sample_name[:-len(ext)]
-                break
-        
-        return sample_name
 
 def get_sample_name_from_line(line):
     """Extract sample name from junction file line"""
@@ -1151,13 +1125,6 @@ def merge_discordant_logics(sjc_file: str):
     return sjc
 
  
-def boolean_to_bit(bool_vec):
-    # Convert boolean vector to string of "1"s and "0"s
-    bin_str = "".join(["1" if b else "0" for b in bool_vec])
-
-    return bin_str
-
-
 def flatten_tuple(t):
     # t: tuple like ('chr1:100-200', '+')' or str 'chr1:100-200'
     if isinstance(t, tuple):
@@ -1582,13 +1549,46 @@ if __name__ == "__main__":
 
     if not options.keeptemp:
         sys.stderr.write("Remove generated temp files... \n")
-        with open(os.path.join(options.rundir, options.outprefix) + "_sortedlibs") as f:
-            for tmp in [ln.strip() for ln in f.readlines()]:
-                os.remove(tmp)
-        os.remove(os.path.join(options.rundir, options.outprefix) + "_sortedlibs")
+        
+        sortedlibs_file = os.path.join(options.rundir, options.outprefix) + "_sortedlibs"
+        
+        # Check if the sortedlibs file exists before trying to process it
+        if os.path.exists(sortedlibs_file):
+            try:
+                with open(sortedlibs_file) as f:
+                    for tmp in [ln.strip() for ln in f.readlines()]:
+                        if os.path.exists(tmp):
+                            try:
+                                os.remove(tmp)
+                                if options.verbose:
+                                    sys.stderr.write(f"Removed {tmp}\n")
+                            except Exception as e:
+                                sys.stderr.write(f"Warning: Could not remove {tmp}: {e}\n")
+                        else:
+                            if options.verbose:
+                                sys.stderr.write(f"File {tmp} already removed or doesn't exist\n")
+                
+                # Remove the sortedlibs file itself
+                os.remove(sortedlibs_file)
+            except Exception as e:
+                sys.stderr.write(f"Warning: Could not process {sortedlibs_file}: {e}\n")
+        else:
+            sys.stderr.write(f"Warning: {sortedlibs_file} not found\n")
+        
+        # Clean up clustering files if they exist
         if options.cluster == None:
-            os.remove(f"{options.rundir}/clustering/{options.outprefix}_pooled")
-            os.remove(f"{options.rundir}/clustering/{options.outprefix}_refined")
+            pooled_file = f"{options.rundir}/clustering/{options.outprefix}_pooled"
+            refined_file = f"{options.rundir}/clustering/{options.outprefix}_refined"
+            
+            for cleanup_file in [pooled_file, refined_file]:
+                if os.path.exists(cleanup_file):
+                    try:
+                        os.remove(cleanup_file)
+                        if options.verbose:
+                            sys.stderr.write(f"Removed {cleanup_file}\n")
+                    except Exception as e:
+                        sys.stderr.write(f"Warning: Could not remove {cleanup_file}: {e}\n")
+        
         sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
         
     if (options.annot == None) or (options.genome == None):
