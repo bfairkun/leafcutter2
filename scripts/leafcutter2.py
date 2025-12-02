@@ -1211,10 +1211,15 @@ def annotate_noisy(options):
         fractions = [x.split("/") for x in ln[1:]]
         usages = [int(f[0]) / (float(f[1]) + 0.1) for f in fractions] # intron usage ratios
         reads = [int(f[0]) for f in fractions]  # numerators
-        sdreads = stdev(reads)  # standard deviation of read counts across samples
+        if len(reads) < 2:
+            print('stdev reads error')
+            print(reads)
+            sdreads = 0
+        else:
+            sdreads = stdev(reads)  # standard deviation of read counts across samples
 
         # remove intron if read count SD < 0.5 and usage ratios are all 0
-        if sum(usages) == 0 or sdreads < minreadstd:
+        if sum(usages) == 0 or (sdreads < minreadstd):
             N_skipped_introns += 1
             continue
 
@@ -1532,10 +1537,16 @@ if __name__ == "__main__":
         sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
         
     if (options.annot == None) or (options.genome == None):
-        shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz", 
-                    os.path.join(options.rundir, options.outprefix) + ".cluster_ratios.unclassified.gz")
-        shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz", 
-                    os.path.join(options.rundir, options.outprefix) + ".junction_counts.unclassified.gz")
+        if not options.const:
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".cluster_ratios.unclassified.gz")
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".junction_counts.unclassified.gz")
+        else:
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.constcounts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".cluster_ratios.unclassified.gz")
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.constcounts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".junction_counts.unclassified.gz")
     else:
         
         if not options.keepleafcutter1:
