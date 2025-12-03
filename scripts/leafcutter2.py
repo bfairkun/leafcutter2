@@ -1334,7 +1334,9 @@ def main(options, libl):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
         "-j",
         "--juncfiles",
         dest="juncfiles",
@@ -1342,7 +1344,7 @@ if __name__ == "__main__":
         help="a text file storing paths to junction files, one path per line",
     )
 
-    parser.add_argument(
+    input_group.add_argument(
         "--leafcutter1-counts-file",
         dest="counts_file",
         default=None,
