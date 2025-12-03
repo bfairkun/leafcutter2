@@ -1233,8 +1233,8 @@ def annotate_noisy(options):
         else:
             sdreads = 0
 
-        # remove intron if read count SD < minreadstd (only when multiple samples) and usage ratios are all 0
-        if sum(usages) == 0 or (sdreads < minreadstd and num_samples > 1):
+        # remove intron if read count SD < 0.5 and usage ratios are all 0
+        if sum(usages) == 0 or sdreads < minreadstd:
             N_skipped_introns += 1
             continue
 
@@ -1592,10 +1592,16 @@ if __name__ == "__main__":
         sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
         
     if (options.annot == None) or (options.genome == None):
-        shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz", 
-                    os.path.join(options.rundir, options.outprefix) + ".cluster_ratios.unclassified.gz")
-        shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz", 
-                    os.path.join(options.rundir, options.outprefix) + ".junction_counts.unclassified.gz")
+        if not options.const:
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".cluster_ratios.unclassified.gz")
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".junction_counts.unclassified.gz")
+        else:
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.constcounts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".cluster_ratios.unclassified.gz")
+            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.constcounts.gz", 
+                        os.path.join(options.rundir, options.outprefix) + ".junction_counts.unclassified.gz")
     else:
         
         if not options.keepleafcutter1:
