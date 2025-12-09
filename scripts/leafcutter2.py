@@ -1158,7 +1158,6 @@ def validate_gtf_requirements(gtf_file, options):
     attribute_alternatives = {
         'gene_name': ['gene_name', 'gene_id', 'gene_symbol'],
         'transcript_name': ['transcript_name', 'transcript_id'], 
-        'gene_type': ['gene_type', 'gene_biotype'],
         'transcript_type': ['transcript_type', 'transcript_biotype']
     }
     
@@ -1481,7 +1480,6 @@ def main(options, libl):
             outprefix=options.outprefix,
             max_juncs=options.max_juncs,
             keepannot=options.keepannot,
-            gene_type=options.gene_type,
             transcript_type=options.transcript_type,
             gene_name=options.gene_name,
             transcript_name=options.transcript_name,
@@ -1661,18 +1659,10 @@ if __name__ == "__main__":
     )
     
     parser.add_argument(
-        "-g",
-        "--gene_type",
-        dest="gene_type",
-        default="",  # Changed from "gene_type" to ""
-        help="tag for gene type in GTF file (default: auto-detect from gene_type, gene_biotype)",
-    )
-
-    parser.add_argument(
         "-t",
         "--transcript_type",
         dest="transcript_type",
-        default="",  # Changed from "transcript_type" to ""
+        default="",
         help="tag for transcript type in GTF file (default: auto-detect from transcript_type, transcript_biotype)",
     )
 
@@ -1680,7 +1670,7 @@ if __name__ == "__main__":
         "-gn",
         "--gene_name",
         dest="gene_name",
-        default="",  # Changed from "gene_name" to ""
+        default="",
         help="tag for gene name or ID in GTF file (default: auto-detect from gene_name, gene_id, gene_symbol)",
     )
 
@@ -1688,7 +1678,7 @@ if __name__ == "__main__":
         "-tn",
         "--transcript_name",
         dest="transcript_name",
-        default="",  # Changed from "transcript_name" to ""
+        default="",
         help="tag for transcript name or ID in GTF file (default: auto-detect from transcript_name, transcript_id)",
     )
 
