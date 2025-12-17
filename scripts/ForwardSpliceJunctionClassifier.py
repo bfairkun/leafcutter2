@@ -10,12 +10,14 @@ import argparse
 import gzip
 import pickle
 import sys
+import logging
 from bisect import insort
 from statistics import mean, median, mode, multimode
 
 import pyfastx
 from Bio.Seq import Seq
 
+logger = logging.getLogger(__name__)
 
 def tx_by_gene(gtf_annot, 
                gene_type: str, 
@@ -469,7 +471,7 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons,gene_name, fa,
         final_check = []
         depth += 1
         if verbose:
-            sys.stdout.write("Depth %s, Seed L = %s\n"%(depth, len(seed)))
+            logger.debug(f"Depth {depth}, Seed L = {len(seed)}")
                     
         for s in seed:
             # first check that the seed paths are good        
@@ -658,7 +660,7 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons,gene_name, fa,
                         if j_coord not in junc_pass:
                             junc_pass[j_coord] = 0
                             if verbose:
-                                sys.stdout.write("junction %s pass\n"%j_coord)
+                                logger.debug(f"junction {j_coord} pass")
         """Quinn Comment: we could have a new path_pass added, so our while loop checks again to see if there are any new paths 
         that are now going to be passing considering our additions"""
         if len(new_paths) == 0:
@@ -890,7 +892,7 @@ def ClassifySpliceJunction(
     # read leafcutter perind file and store junctions in dictionary: dic_junc
     # key = (chrom,strand), value = list of junctions [(start,end)]
     dic_junc = {}
-    sys.stdout.write(f"Processing junction counts {perind_file}...")
+    logger.info(f"Processing junction counts {perind_file}...")
     for ln in gzip.open(perind_file):
         junc_info = ln.decode('ascii').split()[0] # first column
         if junc_info == "chrom": continue # header
@@ -905,24 +907,23 @@ def ClassifySpliceJunction(
     for chrom, strand in dic_junc:
         dic_junc[(chrom, strand)] = [(x[0] , x[1] + 1) for x in dic_junc[(chrom, strand)]]
 
-    sys.stdout.write(" done!\n")
+    logger.info("Processed junctions.")
     if verbose:
-        sys.stdout.write("Processed: ")
         for chrstrand in dic_junc:
-            sys.stdout.write(f"{len(dic_junc[chrstrand])} jxns on {chrstrand[0]} ({chrstrand[1]}).")
+            logger.debug(f"{len(dic_junc[chrstrand])} jxns on {chrstrand[0]} ({chrstrand[1]}).")
 
     
     # load or parse gtf annotations
     # g_coords: gene coordinates, grouped by chromosome and strand
     # g_info: a dictionary with (transcript_name, gene_name) as keys, and intron info as values
     try: 
-        sys.stdout.write("Loading annotations...")
+        logger.info("Loading annotations...")
         parsed_gtf = f"{rundir}/{gtf_annot.split('/')[-1].split('.gtf')[0]}_SJC_annotations.pckle"
         with open(parsed_gtf, 'rb') as f:
             g_coords, g_info = pickle.load(f)
-        sys.stdout.write(" done!\n")
+        logger.info("Loaded annotations.")
     except:
-        sys.stdout.write("Parsing annotations for the first time...\n")
+        logger.info("Parsing annotations for the first time...")
         g_coords, g_info, ss2gene = parse_annotation(gtf_annot, gene_type, transcript_type, gene_name, transcript_name)
         
     
@@ -939,7 +940,7 @@ def ClassifySpliceJunction(
                 g_coords[(chrom,strand)].remove(g)
             for g in to_remove_ginfo:
                 g_info.pop(g)
-        sys.stdout.write("Saving parsed annotations...\n")
+        logger.info("Saving parsed annotations...")
         if keepannot:
             with open(parsed_gtf, 'wb') as f:
                 pickle.dump((g_coords, g_info), f)
@@ -947,36 +948,34 @@ def ClassifySpliceJunction(
 
     txn2gene = f"{rundir}/txn2gene.{gtf_annot.split('/')[-1].split('.gtf')[0]}_SJC_annotations.pckle"
     try:
-        sys.stdout.write("Loading txn2gene annotations...")
+        logger.info("Loading txn2gene annotations...")
         with open(txn2gene, 'rb') as f:
             transcripts_by_gene = pickle.load(f)
     except:
-        sys.stdout.write("Failed... Making txn2gene annotations...\n")
+        logger.info("Failed... Making txn2gene annotations...")
         transcripts_by_gene = tx_by_gene(gtf_annot, gene_type, transcript_type, gene_name, transcript_name)
         if keepannot:
             with open(txn2gene, 'wb') as f:
                 pickle.dump(transcripts_by_gene, f)
-    sys.stdout.write(" done!\n")
-
+    logger.info("Loaded txn2gene annotations.")
 
     nmd_tx2gene = f"{rundir}/nmd_txn2gene.{gtf_annot.split('/')[-1].split('.gtf')[0]}_SJC_annotations.pckle"
     try:
-        sys.stdout.write("Loading txn2gene annotations...")
+        logger.info("Loading nmd_txn2gene annotations...")
         with open(nmd_tx2gene, 'rb') as f:
             nmd_tx_by_gene = pickle.load(f)
     except:
-        sys.stdout.write("Failed... Making txn2gene annotations...\n")
+        logger.info("Failed... Making nmd_txn2gene annotations...")
         nmd_tx_by_gene = NMD_tx(gtf_annot, gene_type, transcript_type, gene_name, transcript_name)
         if keepannot:
             with open(nmd_tx2gene, 'wb') as f:
                 pickle.dump(nmd_tx_by_gene, f)
-    sys.stdout.write(" done!\n")
-
+    logger.info("Loaded nmd_txn2gene annotations.")
 
     gene_juncs = {}
     for chrom,strand in dic_junc:
         if (chrom,strand) not in g_coords: 
-            sys.stderr.write(f"Could not find {chrom} ({strand}) in annotations...\n")
+            logger.error(f"Could not find {chrom} ({strand}) in annotations...")
             continue
         juncs = [(x,x) for x in dic_junc[(chrom,strand)]]
         juncs.sort()
@@ -1004,7 +1003,7 @@ def ClassifySpliceJunction(
 
         extra_utr_rule = {'junction': [], 'annotated':[], 'coding': [], 'utr': [], 'gencode': []}
 
-        sys.stdout.write(f"Processing {gene_name} ({chrom}:{strand})\n")
+        logger.debug(f"Processing {gene_name} ({chrom}:{strand})")
         
         query_juncs = gene_juncs[(gene_name,chrom,strand)] # from LeafCutter perind file
         if gene_name not in g_info: continue
@@ -1017,7 +1016,7 @@ def ClassifySpliceJunction(
         stop_codons = g_info[gene_name]['stop_codon']
 
         if verbose:
-            sys.stdout.write(f"LeafCutter junctions ({len(query_juncs)}) All junctions ({len(junctions)}) Start codons ({len(start_codons)}) Stop codons ({len(stop_codons)}) \n")
+            logger.debug(f"LeafCutter junctions ({len(query_juncs)}) All junctions ({len(junctions)}) Start codons ({len(start_codons)}) Stop codons ({len(stop_codons)})")
 
         
         if len(junctions) <= max_juncs:
@@ -1028,10 +1027,12 @@ def ClassifySpliceJunction(
                 junc_fail = set(junc_fail.keys())
                 junc_pass = set(junc_pass.keys())
             except:
-                if verbose: sys.stdout.write(f"Skipping... seq fetching problem\n")
+                if verbose:
+                    logger.warning("Skipping... seq fetching problem")
                 continue
         else:
-            if verbose: sys.stdout.write(f"Skipping... Too many juncs (> {str(max_juncs)})\n")
+            if verbose:
+                logger.info(f"Skipping... Too many juncs (> {str(max_juncs)})")
             junc_pass = set()
             #Don't want to run all these junctions through the extra rules
             junc_fail = set()
@@ -1114,5 +1115,5 @@ def ClassifySpliceJunction(
             if j not in utr_js:
                 if j not in g_info[gene_name]['pcjunctions']:
                     nout.write('\t'.join([gene_name, f'{chrom}:{j[0]}-{j[1]-1}',
-                                        str(ejc_distances[w])])+'\n') 
+                                        str(ejc_distances[w])])+'\n')
 
