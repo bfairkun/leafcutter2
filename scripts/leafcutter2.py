@@ -19,6 +19,7 @@ import ForwardSpliceJunctionClassifier as sjcf
 import pandas as pd
 import pyfastx
 import logging
+import Reformat_gtf
 
 logger = logging.getLogger(__name__)
 
@@ -844,7 +845,7 @@ def sort_junctions(libl, options):
                 if chrom not in by_chrom:
                     # if refined exon chrom is not found in junc file, write 0/cluster_total
                     buf.append(f"{chromID}:{start}:{end}:clu_{clu}_{strand} 0/{tot}\n")
-                elif (start, end) in by_chrom[chrom]:
+                elif (start, end) in by_chrom:
                     # if refind exon is in junc file, write exon reads / cluster_total
                     buf.append(
                         f"{chromID}:{start}:{end}:clu_{clu}_{strand} {by_chrom[chrom][(start,end)]}/{tot}\n"
@@ -1282,6 +1283,58 @@ def validate_gtf_requirements(gtf_file, options):
     
     return options
 
+def has_cds_feature(gtf_file: str) -> bool:
+    """Detect if any CDS feature exists in the GTF (streaming)."""
+    try:
+        opener = gzip.open if gtf_file.endswith('.gz') else open
+        with opener(gtf_file, 'rt') as fh:
+            for line in fh:
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) >= 3 and parts[2] == 'CDS':
+                    return True
+    except Exception as e:
+        logger.warning(f"Failed scanning GTF for CDS: {e}")
+    return False
+
+
+def validate_or_reformat_gtf(gtf_file, options):
+    """
+    Validate GTF; if validation fails and auto-reformat is enabled, attempt
+    to reformat with Reformat_gtf and re-validate. Updates options.annot.
+    """
+    try:
+        return validate_gtf_requirements(gtf_file, options)
+    except SystemExit:
+        if getattr(options, 'no_auto_reformat', False):
+            logger.error("GTF validation failed and auto-reformat is disabled.")
+            raise
+        if not options.genome:
+            logger.error("GTF validation failed and genome fasta is required to attempt auto-reformat.")
+            raise
+        base = os.path.basename(gtf_file)
+        base = base[:-3] if base.endswith('.gz') else base
+        base = base[:-4] if base.endswith('.gtf') else base
+        reformatted = os.path.join(options.rundir, f"reformatted_{base}.gtf")
+        cds_present = has_cds_feature(gtf_file)
+        trans_approach = 'A' if cds_present else 'D'
+        arg_str = (
+            f"-i {gtf_file} -fa {options.genome} "
+            f"-transcript_name_attribute_name {options.transcript_name or 'transcript_name'} "
+            f"-gene_name_attribute_name {options.gene_name or 'gene_name'} "
+            f"-infer_gene_type_approach B -infer_transcript_type_approach C "
+            f"-translation_approach {trans_approach} -o {reformatted}"
+        )
+        logger.info(f"Attempting to reformat GTF (CDS={'yes' if cds_present else 'no'}) -> {reformatted}")
+        try:
+            Reformat_gtf.main(arg_str)
+        except Exception as e:
+            logger.error(f"Reformat_gtf failed: {e}")
+            raise SystemExit(1)
+        options.annot = reformatted
+        return validate_gtf_requirements(options.annot, options)
+
 def annotate_noisy(options):
     """Annotate introns
 
@@ -1448,7 +1501,7 @@ def main(options, libl):
     if options.annot != None and options.genome != None:
 
         # Validate GTF and auto-detect attributes
-        options = validate_gtf_requirements(options.annot, options)
+        options = validate_or_reformat_gtf(options.annot, options)
 
         logger.info(f"Loading genome {options.genome} ...")
         fa = pyfastx.Fasta(options.genome)
@@ -1680,6 +1733,14 @@ if __name__ == "__main__":
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level (default INFO)",
+    )
+
+    parser.add_argument(
+        "--no-auto-reformat-gtf",
+        dest="no_auto_reformat",
+        action="store_true",
+        default=False,
+        help="Disable automatic GTF reformatting when validation fails",
     )
 
     options = parser.parse_args()
