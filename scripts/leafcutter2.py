@@ -1322,8 +1322,9 @@ def validate_or_reformat_gtf(gtf_file, options):
         trans_approach = 'A' if cds_present else 'D'
         arg_str = (
             f"-i {gtf_file} -fa {options.genome} "
-            f"-transcript_name_attribute_name {options.transcript_name or 'transcript_name'} "
-            f"-gene_name_attribute_name {options.gene_name or 'gene_name'} "
+            f"-extra_attributes {options.gene_name},{options.transcript_name},{options.transcript_type} "
+            f"-transcript_id_attribute_name {options.transcript_name or 'transcript_id'} "
+            f"-gene_id_attribute_name {options.gene_name or 'gene_id'} "
             f"-infer_gene_type_approach B -infer_transcript_type_approach C "
             f"-translation_approach {trans_approach} -o {reformatted}"
         )

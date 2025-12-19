@@ -33,8 +33,25 @@ def reorder_gtf(gtf_stringio, output_gtf, mode='w'):
     and write to output file."""
     # Read the GTF data into a pandas DataFrame
     columns = ['seqname', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attribute']
-    df = pd.read_csv(gtf_stringio, sep='\t', names=columns, comment='#')
-
+    # Explicit dtypes to avoid DtypeWarning (score/frame can be '.' or numeric)
+    dtype_map = {
+        'seqname': 'string',
+        'source': 'string',
+        'feature': 'string',
+        'start': 'int64',
+        'end': 'int64',
+        'score': 'string',   # keep as string to handle '.'
+        'strand': 'string',
+        'frame': 'string',   # keep as string to handle '.'
+        'attribute': 'string'
+    }
+    df = pd.read_csv(
+        gtf_stringio,
+        sep='\t',
+        names=columns,
+        comment='#',
+        dtype=dtype_map
+    )
     # Extract gene_id and transcript_id from the attribute column
     df['gene_id'] = df['attribute'].str.extract(r'gene_id "([^"]+)"')
     df['transcript_id'] = df['attribute'].str.extract(r'transcript_id "([^"]+)"')
