@@ -20,6 +20,7 @@ import pandas as pd
 import pyfastx
 import logging
 import Reformat_gtf
+import shlex
 
 logger = logging.getLogger(__name__)
 
@@ -1229,7 +1230,7 @@ def validate_gtf_requirements(gtf_file, options):
         logger.error(f"  Found feature types: {sorted(found_features)}\n")
         logger.error("  Required features: gene, exon, start_codon, stop_codon, CDS\n")
         logger.error("  Note: UTR classification is determined from start/stop codons, not UTR features\n")
-        exit(1)
+        raise SystemExit(1)  # changed from exit(1)
     
     # Check for protein_coding transcripts
     if not protein_coding_found:
@@ -1249,7 +1250,7 @@ def validate_gtf_requirements(gtf_file, options):
             if current_value not in found_attributes:
                 logger.error(f"Error: User-specified attribute '{current_value}' for {option_name} not found in GTF\n")
                 logger.error(f"Available attributes: {sorted(found_attributes)}\n")
-                exit(1)
+                raise SystemExit(1)  # changed from exit(1)
         else:
             # Auto-detect from alternatives
             detected = None
@@ -1266,7 +1267,7 @@ def validate_gtf_requirements(gtf_file, options):
                 logger.error(f"  Looked for: {alternatives}\n") 
                 logger.error(f"  Available attributes: {sorted(found_attributes)}\n")
                 logger.error(f"  Suggestion: Your GTF may use non-standard attribute names\n")
-                exit(1)
+                raise SystemExit(1)  # changed from exit(1)
     
     # Print summary of what was used
     if user_specified:
@@ -1328,7 +1329,13 @@ def validate_or_reformat_gtf(gtf_file, options):
         )
         logger.info(f"Attempting to reformat GTF (CDS={'yes' if cds_present else 'no'}) -> {reformatted}")
         try:
-            Reformat_gtf.main(arg_str)
+            logger.warning("Reformat_gtf is experimental; please check output GTF carefully.")
+            logger.warning("Running Reformat_gtf with arguments:\n" + arg_str)
+            # Call main with a list of args
+            Reformat_gtf.main(shlex.split(arg_str))
+        except SystemExit as e:
+            logger.error(f"Reformat_gtf exited with status {e.code}")
+            raise SystemExit(1)
         except Exception as e:
             logger.error(f"Reformat_gtf failed: {e}")
             raise SystemExit(1)
