@@ -1319,7 +1319,7 @@ def validate_or_reformat_gtf(gtf_file, options):
         base = base[:-4] if base.endswith('.gtf') else base
         reformatted = os.path.join(options.rundir, f"reformatted_{base}.gtf")
         cds_present = has_cds_feature(gtf_file)
-        trans_approach = 'A' if cds_present else 'D'
+        trans_approach = 'B' if cds_present else 'D'
         arg_str = (
             f"-i {gtf_file} -fa {options.genome} "
             f"-extra_attributes {options.gene_name},{options.transcript_name},{options.transcript_type} "
@@ -1330,15 +1330,15 @@ def validate_or_reformat_gtf(gtf_file, options):
         )
         logger.info(f"Attempting to reformat GTF (CDS={'yes' if cds_present else 'no'}) -> {reformatted}")
         try:
-            logger.warning("Reformat_gtf is experimental; please check output GTF carefully.")
-            logger.warning("Running Reformat_gtf with arguments:\n" + arg_str)
+            logger.warning("Reformatting gtf is experimental; please check output GTF carefully.")
+            logger.warning("Running Transcript_tools to reformat gtf with arguments:\n" + arg_str)
             # Call main with a list of args
-            Reformat_gtf.main(shlex.split(arg_str))
+            Transcript_tools.main(shlex.split(arg_str))
         except SystemExit as e:
-            logger.error(f"Reformat_gtf exited with status {e.code}")
+            logger.error(f"Transcript_tools exited with status {e.code}")
             raise SystemExit(1)
         except Exception as e:
-            logger.error(f"Reformat_gtf failed: {e}")
+            logger.error(f"Transcript_tools failed: {e}")
             raise SystemExit(1)
         options.annot = reformatted
         return validate_gtf_requirements(options.annot, options)

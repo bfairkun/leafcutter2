@@ -27,6 +27,7 @@ import csv
 import logging
 import tempfile
 import os
+from Bio import bgzf
 
 def reorder_gtf(gtf_stringio, output_gtf, mode='w'):
     """Reorder GTF lines by gene and transcript, ensuring correct hierarchical sorting,
@@ -797,12 +798,23 @@ def parse_args(args=None):
     parser.add_argument('--min_new_ORF_length', dest='min_new_ORF_length', type=int, default=50, help='Minimum ORF length (in codons) for newly predicted ORFs in translation approaches C, D, E, and F. Only relevant when using translation approach C, D, E, or F. default: %(default)s')
     parser.add_argument('--include_uorf_analysis', action='store_true', help='Include upstream ORF (uORF) analysis in output. Adds uORF_genomic_positions, uORF_classifications, uORF_lengths_aa, and uORF_relative_positions attributes.', default=False)
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
+    parser.add_argument('--sort_output', action='store_true', default=False,
+                        help='Sort outputs before writing: BED12 will be coordinate-sorted; GTF will be sorted by gene, then transcript, then features within transcript. If not set, BED12 preserves read order and GTF preserves construction order.')
     return parser.parse_args(args)
 
 
 def setup_logging(verbose):
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def _open_bgzip_aware(path, text_mode=True):
+    """Open path for writing, using BGZF for .gz/.bgz outputs.
+    text_mode=True uses text mode; otherwise binary."""
+    mode = 'wt' if text_mode else 'wb'
+    if path.endswith('.gz') or path.endswith('.bgz'):
+        return bgzf.open(path, mode)
+    # fallback to regular open
+    return open(path, 'w' if text_mode else 'wb')
 
 def main(args=None):
     args = parse_args(args)
@@ -901,36 +913,32 @@ def main(args=None):
     
     # Always initialize gene_types_dict - needed for both GTF and BED output
     gene_types_dict = defaultdict(lambda: defaultdict((set)))
+
+    # BED output setup (sorting controlled by --sort_output)
     bed_out_fh = None
+    bed_header_line = None
+    sort_bed = bool(args.bed12_out) and args.sort_output
     if args.bed12_out:
-        # Auto-detect gzip output for BED12
-        bed_open_func = gzip.open if args.bed12_out.endswith('.gz') else open
-        bed_mode = 'wt' if args.bed12_out.endswith('.gz') else 'w'
-        bed_out_fh = bed_open_func(args.bed12_out, bed_mode)
-        
-        # Write BED file header
+        # Build BED header
         bed_header_fields = [
             "chr", "start", "end", "name", "score", "strand", 
             "thickStart", "thickEnd", "color", "blockCount", "blockSizes", "blockStarts",
             "gene_id", "transcript_id", "gene_type", "transcript_type", "NMDFinderB"
         ]
-        # Add extra calculated attributes to header
         extra_calc_attrs = ["FiveUTR_nEx", "FiveUTR_len", "ThreeUTR_nEx", "ThreeUTR_len", 
                            "ThreeUTR_nEx_AfterFirst50", "CDSLen", "Introns"]
         bed_header_fields.extend(extra_calc_attrs)
-        
-        # Conditionally add uORF attributes to header ONLY if analysis is enabled
         if args.include_uorf_analysis:
-            uorf_attrs = ["uORF_genomic_positions", "uORF_classifications", 
-                          "uORF_lengths_aa", "uORF_relative_positions"]
-            bed_header_fields.extend(uorf_attrs)
-        
-        # Add extra attributes from input only if they exist
+            bed_header_fields.extend(["uORF_genomic_positions", "uORF_classifications", "uORF_lengths_aa", "uORF_relative_positions"])
         if extra_attributes:
             bed_header_fields.extend(extra_attributes)
-        
-        # Write header line
-        bed_out_fh.write("#" + "\t".join(bed_header_fields) + "\n")
+        bed_header_line = "#" + "\t".join(bed_header_fields) + "\n"
+        if sort_bed:
+            bed_lines = []
+        else:
+            bed_out_fh = _open_bgzip_aware(args.bed12_out, text_mode=True)
+            bed_out_fh.write(bed_header_line)
+
     for i,l in enumerate(bed12.splitlines()):
         if i >= 0:
             if i % 1000 == 0: logging.debug(f'processed {i} trancsripts for output...')
@@ -1042,30 +1050,28 @@ def main(args=None):
                 _ = gtf_stringio.write(gtf_formatted_bedline_utr_start_stop(transcript_out, source=source, attributes_str=transcript_attributes))
 
             # For BED output, create a clean list of values
-            if bed_out_fh is not None:
+            if args.bed12_out:
                 bed_extra_fields = [gene_id, transcript_id, gene_type, transcript_type_out, NMDFinderB_NoWhitespace]
                 bed_extra_fields.extend([str(v) for v in extra_calculated_transcript_attributes.values()])
-                
-                # Conditionally add uORF data to BED output ONLY if analysis is enabled
                 if args.include_uorf_analysis:
                     bed_extra_fields.extend([uorf_genomic_pos, uorf_classes, uorf_lengths, uorf_relative_pos])
-                
                 bed_extra_fields.extend(extra_attribute_values)
-                
-                _ = bed_out_fh.write(bed12_formatted_bedline(transcript_out, 
-                                                            color=get_NMD_detective_B_classification_color(NMDFinderB), 
-                                                            attributes_str='\t' + '\t'.join(bed_extra_fields)))
-            # Track gene information
-            # Always track gene types (needed for both GTF and BED output)
-            gene_types_dict[gene_id]['gene_types_in_input'].add(gene_type)
-            gene_types_dict[gene_id]['trancscript_types'].add(transcript_type_out)
-            
-            # Only track gene coordinates if GTF output is enabled
-            if args.gtf_out:
-                # gene_dict contains gene level information needed to properly write out parent (gene-level) lines based on child (transcript-level) lines
-                gene_coords_dict[gene_id][transcript.chr][transcript.strand]['start'].add(transcript.start)
-                gene_coords_dict[gene_id][transcript.chr][transcript.strand]['end'].add(transcript.end)
-    if bed_out_fh is not None: bed_out_fh.close()
+                bed_line = bed12_formatted_bedline(transcript_out, 
+                                                   color=get_NMD_detective_B_classification_color(NMDFinderB), 
+                                                   attributes_str='\t' + '\t'.join(bed_extra_fields))
+                if sort_bed:
+                    bed_lines.append(bed_line)
+                else:
+                    _ = bed_out_fh.write(bed_line)
+    if args.bed12_out:
+        if sort_bed:
+            with _open_bgzip_aware(args.bed12_out, text_mode=True) as fh:
+                fh.write(bed_header_line)
+                for line in sorted(bed_lines, key=lambda s: (s.split('\t')[0], int(s.split('\t')[1]), int(s.split('\t')[2]))):
+                    fh.write(line)
+        else:
+            if bed_out_fh is not None:
+                bed_out_fh.close()
 
     # Only process GTF output if it was requested
     if args.gtf_out:
@@ -1091,13 +1097,8 @@ def main(args=None):
         # Write out gene_type attributes
         gtf_stringio_updated = add_gene_type_to_gtf(gtf_stringio, gene_types_dict_final)
 
-        logging.info('sorting and writing out gtf')
-        # Auto-detect gzip output for GTF
-        gtf_open_func = gzip.open if args.gtf_out.endswith('.gz') else open
-        gtf_mode = 'wt' if args.gtf_out.endswith('.gz') else 'w'
-        
-        with gtf_open_func(args.gtf_out, gtf_mode) as output_fh:
-            # transfer commented headers from original input file (if GTF format)
+        logging.info('writing out gtf')
+        with _open_bgzip_aware(args.gtf_out, text_mode=True) as output_fh:
             if args.input_type == "gtf":
                 input_open_func = gzip.open if args.transcripts_in.endswith('.gz') else open
                 input_mode = 'rt' if args.transcripts_in.endswith('.gz') else 'r'
@@ -1108,7 +1109,20 @@ def main(args=None):
                         else:
                             break
             _ = output_fh.write(f"#! args: {args}\n")
-            reorder_gtf(gtf_stringio_updated, output_fh, mode='a')
+            # If not sorting by coordinates, reorder by gene→transcript→features
+            if not args.sort_output:
+                reorder_gtf(gtf_stringio_updated, output_fh, mode='a')
+            else:
+                # Coordinate sort by seqname, start, end
+                columns = ['seqname', 'source', 'feature', 'start', 'end', 'score', 'strand', 'frame', 'attribute']
+                dtype_map = {
+                    'seqname': 'string', 'source': 'string', 'feature': 'string',
+                    'start': 'int64', 'end': 'int64', 'score': 'string',
+                    'strand': 'string', 'frame': 'string', 'attribute': 'string'
+                }
+                df = pd.read_csv(gtf_stringio_updated, sep='\t', names=columns, comment='#', dtype=dtype_map)
+                df_sorted = df.sort_values(by=['seqname', 'start', 'end']).reset_index(drop=True)
+                df_sorted.to_csv(output_fh, sep='\t', header=False, index=False, mode='a', quoting=csv.QUOTE_NONE)
     else:
         logging.info('GTF output disabled - skipping GTF processing and sorting')
 
