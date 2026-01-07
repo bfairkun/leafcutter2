@@ -1185,17 +1185,26 @@ def annotate_noisy(options):
         if options.verbose:
             sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Loaded.\n")
 
-    if not options.const:
-        fname = fnameout + "_perind.counts.gz"  # no constitutive introns
-    else:
-        fname = fnameout + "_perind.constcounts.gz"
+        # Use the counts file source (either provided or generated)
+        if options.counts_file:
+            fname = options.counts_file
+        else:
+            if not options.const:
+                fname = fnameout + "_perind.counts.gz"  # no constitutive introns
+            else:
+                fname = fnameout + "_perind.constcounts.gz"
 
-    noisydiag = fname.replace(
-        "_perind.counts", ".cluster_ratios"
-    )  # eg: run/out_perind.counts.classified.gz
-    numersdiag = fname.replace(
-        "_perind.counts", ".junction_counts"
-    )  # eg: run/out_perind_numers.counts.noise.gz
+        # If using provided counts file, adjust output paths to use rundir
+        if options.counts_file:
+            noisydiag = f"{rundir}/{outPrefix}.cluster_ratios.gz"
+            numersdiag = f"{rundir}/{outPrefix}.junction_counts.gz"
+        else:
+            noisydiag = fname.replace(
+                "_perind.counts", ".cluster_ratios"
+            )  # eg: run/out_perind.counts.classified.gz
+            numersdiag = fname.replace(
+                "_perind.counts", ".junction_counts"
+            )  # eg: run/out_perind_numers.counts.noise.gz
 
     foutdiag = gzip.open(noisydiag, "wt")
     foutdiagnumers = gzip.open(numersdiag, "wt")
@@ -1272,19 +1281,27 @@ def main(options, libl):
         os.mkdir(options.rundir)
     os.makedirs(f"{options.rundir}/clustering/", exist_ok=True)
 
-    if options.cluster == None:
-        pool_junc_reads(libl, options)
-        refine_clusters(options)
-        addlowusage(options)
-
-    sort_junctions(libl, options)
-    merge_junctions(options)
-    get_numers(options)
-
-    if not options.const:
-        perind_file = f"{options.rundir}/{options.outprefix}_perind.counts.gz"
+    # Determine perind_file source
+    if options.counts_file:
+        # User provided pre-existing counts file
+        perind_file = options.counts_file
+        sys.stderr.write(f"Using provided counts file: {perind_file}\n")
     else:
-        perind_file = f"{options.rundir}/{options.outprefix}_perind.constcounts.gz"
+        # Run full pipeline to generate counts
+        if options.cluster == None:
+            pool_junc_reads(libl, options)
+            refine_clusters(options)
+            addlowusage(options)
+
+        sort_junctions(libl, options)
+        merge_junctions(options)
+        get_numers(options)
+        
+        # Set perind_file to generated file
+        if not options.const:
+            perind_file = f"{options.rundir}/{options.outprefix}_perind.counts.gz"
+        else:
+            perind_file = f"{options.rundir}/{options.outprefix}_perind.constcounts.gz"
 
     if options.annot != None and options.genome != None:
 
@@ -1317,13 +1334,21 @@ def main(options, libl):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
         "-j",
         "--juncfiles",
         dest="juncfiles",
         type=str,
-        required=True,
         help="a text file storing paths to junction files, one path per line",
+    )
+
+    input_group.add_argument(
+        "--leafcutter1-counts-file",
+        dest="counts_file",
+        default=None,
+        help="Pre-existing counts file (*.counts.gz or *.constcounts.gz). If provided, skip clustering and counting steps and proceed directly to classification.",
     )
 
     parser.add_argument(
@@ -1516,27 +1541,40 @@ if __name__ == "__main__":
 
     options = parser.parse_args()
 
-    if options.juncfiles == None:
+    # Validate input arguments
+    if not options.counts_file and not options.juncfiles:
+        sys.stderr.write("Error: Either --juncfiles or --counts-file must be provided\n")
+        exit(1)
+    
+    if options.counts_file:
+        if not os.path.exists(options.counts_file):
+            sys.stderr.write(f"Error: Counts file {options.counts_file} does not exist\n")
+            exit(1)
+        if not (options.annot and options.genome):
+            sys.stderr.write("Error: When using --counts-file, both --annot and --genome are required for classification\n")
+            exit(1)
+    elif options.juncfiles == None:
         sys.stderr.write("Error: no junction file provided...\n")
         exit(0)
 
     # Get the junction file list with optional sample names
     libl = []
-    for line_num, line in enumerate(open(options.juncfiles), 1):
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-        
-        # Extract filepath for validation
-        filepath = line.split('\t')[0].strip()
-        
-        try:
-            open(filepath)
-        except:
-            sys.stderr.write(f"Error on line {line_num}: {filepath} does not exist... check your junction files.\n")
-            exit(0)
-        
-        libl.append(line)  # Keep the full line (with optional sample name)
+    if options.juncfiles:
+        for line_num, line in enumerate(open(options.juncfiles), 1):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            
+            # Extract filepath for validation
+            filepath = line.split('\t')[0].strip()
+            
+            try:
+                open(filepath)
+            except:
+                sys.stderr.write(f"Error on line {line_num}: {filepath} does not exist... check your junction files.\n")
+                exit(0)
+            
+            libl.append(line)  # Keep the full line (with optional sample name)
 
     chromLst = (
         [f"chr{x}" for x in range(1, 23)]
@@ -1606,13 +1644,42 @@ if __name__ == "__main__":
         
         if not options.keepleafcutter1:
             sys.stderr.write("Remove generated LeafCutter1 files... \n")
-            os.remove(os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz")
-            os.remove(os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz")
+            
+            # Only remove files if they were generated (not using provided counts file)
+            if not options.counts_file:
+                perind_file = os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz"
+                numers_file = os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz"
+                
+                if os.path.exists(perind_file):
+                    os.remove(perind_file)
+                    if options.verbose:
+                        sys.stderr.write(f"Removed {perind_file}\n")
+                
+                if os.path.exists(numers_file):
+                    os.remove(numers_file)
+                    if options.verbose:
+                        sys.stderr.write(f"Removed {numers_file}\n")
+            else:
+                if options.verbose:
+                    sys.stderr.write("Skipping LeafCutter1 file removal - used provided counts file\n")
+                    
             sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
         else:
-            os.makedirs(os.path.join(options.rundir, "leafcutter1_files"), exist_ok=True)
-            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz", 
-                        os.path.join(options.rundir, "leafcutter1_files", options.outprefix) + "_perind.counts.gz")
-            shutil.move(os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz", 
-                        os.path.join(options.rundir, "leafcutter1_files", options.outprefix) + "_perind_numers.counts.gz")
+            # Only move files if they were generated (not using provided counts file)
+            if not options.counts_file:
+                os.makedirs(os.path.join(options.rundir, "leafcutter1_files"), exist_ok=True)
+                
+                perind_file = os.path.join(options.rundir, options.outprefix) + "_perind.counts.gz"
+                numers_file = os.path.join(options.rundir, options.outprefix) + "_perind_numers.counts.gz"
+                
+                if os.path.exists(perind_file):
+                    shutil.move(perind_file, 
+                                os.path.join(options.rundir, "leafcutter1_files", options.outprefix) + "_perind.counts.gz")
+                
+                if os.path.exists(numers_file):
+                    shutil.move(numers_file, 
+                                os.path.join(options.rundir, "leafcutter1_files", options.outprefix) + "_perind_numers.counts.gz")
+            else:
+                if options.verbose:
+                    sys.stderr.write("Skipping LeafCutter1 file preservation - used provided counts file\n")
 
