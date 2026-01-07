@@ -685,28 +685,26 @@ def parse_gtf(gtf: str,
         if ln[0] == "#": continue
         ln = ln.strip().split('\t')
         for i in range(len(fields)):
-            if fields[i] == 'info':
-                dic[fields[i]] = ln[i].replace(
-                    gene_type, 'gene_type'
-                ).replace(
-                    transcript_type, 'transcript_type'
-                ).replace(
-                    gene_name, 'gene_name'
-                ).replace(
-                    transcript_name, 'transcript_name'
-                )
-            else:
-                dic[fields[i]] = ln[i]
+            dic[fields[i]] = ln[i]
 
-        # add 4 additional fields, parsed from info field
-        for ks in ['gene_name', "transcript_type","transcript_name", "gene_type"]:
-            info_fields = [{x.split()[0]: x.split()[1].replace('"', '')} 
-                          for x in dic['info'].split(';') if len(x.split()) > 1]
-            info_fields = {k: v for d in info_fields for k, v in d.items()}
+        # Parse all attributes first
+        info_fields = [{x.split()[0]: x.split()[1].replace('"', '')} 
+                    for x in dic['info'].split(';') if len(x.split()) > 1]
+        info_fields = {k: v for d in info_fields for k, v in d.items()}
+
+        # Map custom attribute names to standard keys
+        attribute_mapping = {
+            'gene_name': gene_name,
+            'transcript_name': transcript_name, 
+            'gene_type': gene_type,
+            'transcript_type': transcript_type
+        }
+
+        for standard_key, custom_attr in attribute_mapping.items():
             try: 
-                dic[ks] = info_fields[ks]
+                dic[standard_key] = info_fields[custom_attr]
             except:
-                dic[ks] = None # if line is a gene, then wont have transcript info
+                dic[standard_key] = None
         yield dic
          
 

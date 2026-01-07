@@ -1139,6 +1139,165 @@ def flatten_tuple(t):
     else:
         return((c, a, b))
 
+def validate_gtf_requirements(gtf_file, options):
+    """
+    Validate GTF file and auto-detect attribute names if not specified by user.
+    
+    Args:
+        gtf_file: Path to GTF file
+        options: argparse options object
+    
+    Returns:
+        options: Modified options object with auto-detected attributes
+    
+    Raises:
+        SystemExit if required features/attributes are missing
+    """
+    
+    # Attribute alternatives in priority order
+    attribute_alternatives = {
+        'gene_name': ['gene_name', 'gene_id', 'gene_symbol'],
+        'transcript_name': ['transcript_name', 'transcript_id'], 
+        'transcript_type': ['transcript_type', 'transcript_biotype']
+    }
+    
+    # Required feature types
+    required_features = {'gene', 'exon', 'start_codon', 'stop_codon', 'CDS'}
+    
+    # Track what we find
+    found_features = set()
+    found_attributes = set()
+    protein_coding_found = False
+    
+    sys.stderr.write(f"Validating GTF file: {gtf_file}\n")
+    
+    # Parse GTF file
+    try:
+        if gtf_file.endswith('.gz'):
+            file_handle = gzip.open(gtf_file, 'rt')
+        else:
+            file_handle = open(gtf_file, 'r')
+            
+        line_count = 0
+        for line in file_handle:
+            line_count += 1
+            if line_count % 100000 == 0:
+                sys.stderr.write(f"  Processed {line_count} lines...\n")
+                
+            # Skip comments and empty lines
+            if line.startswith('#') or not line.strip():
+                continue
+                
+            fields = line.strip().split('\t')
+            if len(fields) < 9:
+                continue
+                
+            feature_type = fields[2]
+            attributes_str = fields[8]
+            
+            # Track feature types
+            found_features.add(feature_type)
+            
+            # Parse attributes
+            attributes = {}
+            for attr_pair in attributes_str.split(';'):
+                attr_pair = attr_pair.strip()
+                if not attr_pair:
+                    continue
+                    
+                # Handle both quoted and unquoted values
+                if '"' in attr_pair:
+                    # Quoted format: gene_name "WASH7P"
+                    parts = attr_pair.split('"')
+                    if len(parts) >= 2:
+                        key = parts[0].strip()
+                        value = parts[1]
+                        attributes[key] = value
+                else:
+                    # Unquoted format: gene_name WASH7P
+                    parts = attr_pair.split(None, 1)
+                    if len(parts) == 2:
+                        key, value = parts
+                        attributes[key] = value
+            
+            # Track all found attributes
+            found_attributes.update(attributes.keys())
+            
+            # Check for protein_coding
+            for attr_name in ['transcript_type', 'transcript_biotype']:
+                if attr_name in attributes and attributes[attr_name] == 'protein_coding':
+                    protein_coding_found = True
+                    
+        file_handle.close()
+        
+    except Exception as e:
+        sys.stderr.write(f"Error reading GTF file {gtf_file}: {e}\n")
+        exit(1)
+    
+    sys.stderr.write(f"GTF validation complete. Processed {line_count} lines.\n")
+    
+    # Validate required features
+    missing_required = required_features - found_features
+    
+    if missing_required:
+        sys.stderr.write("Error: Missing required feature types in GTF:\n")
+        sys.stderr.write(f"  Required but missing: {sorted(missing_required)}\n")
+        sys.stderr.write(f"  Found feature types: {sorted(found_features)}\n")
+        sys.stderr.write("  Required features: gene, exon, start_codon, stop_codon, CDS\n")
+        sys.stderr.write("  Note: UTR classification is determined from start/stop codons, not UTR features\n")
+        exit(1)
+    
+    # Check for protein_coding transcripts
+    if not protein_coding_found:
+        sys.stderr.write("Warning: No 'protein_coding' transcript types found in GTF.\n")
+        sys.stderr.write("  This may affect junction classification.\n")
+    
+    # Auto-detect and validate attributes
+    user_specified = {}
+    auto_detected = {}
+    
+    for option_name, alternatives in attribute_alternatives.items():
+        current_value = getattr(options, option_name)
+        
+        if current_value and current_value != "":
+            # User specified - validate it exists
+            user_specified[option_name] = current_value
+            if current_value not in found_attributes:
+                sys.stderr.write(f"Error: User-specified attribute '{current_value}' for {option_name} not found in GTF\n")
+                sys.stderr.write(f"Available attributes: {sorted(found_attributes)}\n")
+                exit(1)
+        else:
+            # Auto-detect from alternatives
+            detected = None
+            for alternative in alternatives:
+                if alternative in found_attributes:
+                    detected = alternative
+                    break
+                    
+            if detected:
+                auto_detected[option_name] = detected
+                setattr(options, option_name, detected)
+            else:
+                sys.stderr.write(f"Error: No suitable attribute found for {option_name}\n")
+                sys.stderr.write(f"  Looked for: {alternatives}\n") 
+                sys.stderr.write(f"  Available attributes: {sorted(found_attributes)}\n")
+                sys.stderr.write(f"  Suggestion: Your GTF may use non-standard attribute names\n")
+                exit(1)
+    
+    # Print summary of what was used
+    if user_specified:
+        sys.stderr.write("Using user-specified GTF attributes:\n")
+        for option_name, value in user_specified.items():
+            sys.stderr.write(f"  {option_name}: {value}\n")
+            
+    if auto_detected:
+        sys.stderr.write("Auto-detected GTF attributes:\n")
+        for option_name, value in auto_detected.items():
+            sys.stderr.write(f"  {option_name}: {value} (auto-detected)\n")
+    
+    sys.stderr.write("GTF validation and attribute detection complete.\n")
+    
+    return options
 
 def annotate_noisy(options):
     """Annotate introns
@@ -1305,11 +1464,13 @@ def main(options, libl):
 
     if options.annot != None and options.genome != None:
 
+        # Validate GTF and auto-detect attributes
+        options = validate_gtf_requirements(options.annot, options)
+
         sys.stdout.write(f"Loading genome {options.genome} ...")
         fa = pyfastx.Fasta(options.genome)
         sys.stdout.write("done!\n")
 
-        
         sys.stdout.write("Classifying splice junctions...\n")
         sjcf.ClassifySpliceJunction(
             perind_file=perind_file,
@@ -1319,7 +1480,6 @@ def main(options, libl):
             outprefix=options.outprefix,
             max_juncs=options.max_juncs,
             keepannot=options.keepannot,
-            gene_type=options.gene_type,
             transcript_type=options.transcript_type,
             gene_name=options.gene_name,
             transcript_name=options.transcript_name,
@@ -1499,35 +1659,27 @@ if __name__ == "__main__":
     )
     
     parser.add_argument(
-        "-g",
-        "--gene_type",
-        dest="gene_type",
-        default="gene_type",
-        help="tag for gene type in GTF file (default gene_type)",
-    )
-    
-    parser.add_argument(
         "-t",
         "--transcript_type",
         dest="transcript_type",
-        default="transcript_type",
-        help="tag for transcript type in GTF file (default transcript_type)",
+        default="",
+        help="tag for transcript type in GTF file (default: auto-detect from transcript_type, transcript_biotype)",
     )
-    
+
     parser.add_argument(
         "-gn",
         "--gene_name",
         dest="gene_name",
-        default="gene_name",
-        help="tag for gene name or ID in GTF file (default gene_name)",
+        default="",
+        help="tag for gene name or ID in GTF file (default: auto-detect from gene_name, gene_id, gene_symbol)",
     )
-    
+
     parser.add_argument(
         "-tn",
         "--transcript_name",
         dest="transcript_name",
-        default="transcript_name",
-        help="tag for transcript name or ID in GTF file (default transcript_name)",
+        default="",
+        help="tag for transcript name or ID in GTF file (default: auto-detect from transcript_name, transcript_id)",
     )
 
     parser.add_argument(
@@ -1683,3 +1835,4 @@ if __name__ == "__main__":
                 if options.verbose:
                     sys.stderr.write("Skipping LeafCutter1 file preservation - used provided counts file\n")
 
+# python ../scripts/leafcutter2.py -r example/outtut_dir -A annotation/chr10.gtf.gz -r output_dir -G annotation/chr10.fa.gz -j junction_files.txt -L -gn gene_id tn transcript_id
