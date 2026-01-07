@@ -12,7 +12,7 @@ import re
 import shutil
 import sys
 import tempfile
-from statistics import mean, median, stdev
+from statistics import stdev
 from datetime import datetime
 
 import ForwardSpliceJunctionClassifier as sjcf
@@ -113,7 +113,6 @@ def pool_junc_reads(flist, options):
     return
         No returns. Use side effects.
 
-
     Side-effects:
     -------------
     write introns and counts by clusters. Output file is NOT versions sorted.
@@ -137,7 +136,9 @@ def pool_junc_reads(flist, options):
     by_chrom = {}  # { k=(chrom, strand) : v={ k=(start, end) : v=reads } }
 
     for libl in flist:
-        lib = libl.strip()
+        # FIX: Extract only the filepath part, ignoring sample name
+        lib = libl.strip().split('\t')[0].strip()
+        
         if not os.path.isfile(lib):
             continue
 
@@ -602,6 +603,26 @@ def addlowusage(options):
     fout.close()
 
 
+def get_sample_name_from_line(line):
+    """Extract sample name from junction file line"""
+    parts = line.strip().split('\t')
+    filepath = parts[0].strip()
+    
+    if len(parts) >= 2 and parts[1].strip():
+        # Use provided sample name from second column
+        return parts[1].strip(), filepath
+    else:
+        # Use basename approach
+        basename = os.path.basename(filepath)
+        
+        # Remove common file extensions
+        for ext in ['.junc.gz', '.bed.gz', '.junc', '.bed', '.gz']:
+            if basename.endswith(ext):
+                basename = basename[:-len(ext)]
+                break
+        
+        return basename, filepath
+
 def sort_junctions(libl, options):
     """Sort junctions by cluster
 
@@ -671,37 +692,37 @@ def sort_junctions(libl, options):
                 cluExons[cluN] = []
             cluExons[cluN].append((chrom, A, B))
 
-    merges = {}  # stores junc file names as dict { k=filename : v=[filename] }
-    for ll in libl:
-        lib = ll.rstrip()  # 1 junc file path
-        libN = lib.split("/")[
-            -1
-        ]  # get library name from junc file name eg. GTEX-1117F-0226-SM-5GZZ7.tsv.gz
-        if not os.path.isfile(lib):
+    merges = {}  # stores junc file names as dict { k=sample_name : v=[filepath] }
+
+    for line in libl:
+        sample_name, filepath = get_sample_name_from_line(line)
+        
+        if not os.path.isfile(filepath):
             continue
-        if libN not in merges:
-            merges[libN] = []  # why use list, `libN` should always be one element
-        merges[libN].append(lib)
+            
+        if sample_name not in merges:
+            merges[sample_name] = []
+        merges[sample_name].append(filepath)
 
     fout_runlibs = open(
         os.path.join(rundir, outPrefix) + "_sortedlibs", "w"
     )  # intermediate file to store sorted junc file names to be written
 
-    # operate on each libN (library), each libN can have more than 1+ junc files
-    for libN in merges:
+    # operate on each sample_name (library), each sample_name can have more than 1+ junc files
+    for sample_name in merges:
         by_chrom = {}  # to store junctions from original unsorted junc file
 
         # write sorted junc file names into intermediate file
         foutName = os.path.join(
-            rundir, outPrefix + "_" + libN + ".junc.sorted.gz"
+            rundir, outPrefix + "_" + sample_name + ".junc.sorted.gz"
         )  # 'test/gtex_w_clu/gtex_GTEX-1IDJU-0006-SM-CMKFK.junc.sorted.gz'
         fout_runlibs.write(foutName + "\n")  # e.g. 'test/gtex_w_clu/gtex_sortedlibs'
 
         if options.verbose:
-            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Sorting {libN}..\n")
-        if len(merges[libN]) > 1:
+            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Sorting {sample_name}..\n")
+        if len(merges[sample_name]) > 1:
             if options.verbose:
-                sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {' '.join(merges[libN])}...\n")
+                sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {' '.join(merges[sample_name])}...\n")
         else:
             pass
         fout = gzip.open(
@@ -711,11 +732,11 @@ def sort_junctions(libl, options):
         # -------- Process and write junction files --------
 
         # write header
-        fout.write(f"chrom {libN}\n")  # 'chrom GTEX-111VG-0526-SM-5N9BW\n'
+        fout.write(f"chrom {sample_name}\n")  # 'chrom GTEX-111VG-0526-SM-5N9BW\n'
 
         # -------- Gather counts from all junc files of library --------
         # store in by_chrom: { ('chr1', '+') : { (100, 300) : 5, (500, 700): 10, ... } }
-        for lib in merges[libN]:
+        for lib in merges[sample_name]:
             if ".gz" in lib:
                 F = gzip.open(lib)
             else:
@@ -1104,13 +1125,6 @@ def merge_discordant_logics(sjc_file: str):
     return sjc
 
  
-def boolean_to_bit(bool_vec):
-    # Convert boolean vector to string of "1"s and "0"s
-    bin_str = "".join(["1" if b else "0" for b in bool_vec])
-
-    return bin_str
-
-
 def flatten_tuple(t):
     # t: tuple like ('chr1:100-200', '+')' or str 'chr1:100-200'
     if isinstance(t, tuple):
@@ -1190,6 +1204,9 @@ def annotate_noisy(options):
     ln = F.readline().decode()
     foutdiag.write(ln)
     foutdiagnumers.write(ln)
+    
+    # Get number of samples from header line (subtract 1 for the 'chrom' column)
+    num_samples = len(ln.split()) - 1
 
     N_introns_annotated = 0
     N_skipped_introns = 0
@@ -1211,15 +1228,13 @@ def annotate_noisy(options):
         fractions = [x.split("/") for x in ln[1:]]
         usages = [int(f[0]) / (float(f[1]) + 0.1) for f in fractions] # intron usage ratios
         reads = [int(f[0]) for f in fractions]  # numerators
-        if len(reads) < 2:
-            print('stdev reads error')
-            print(reads)
-            sdreads = 0
-        else:
+        if num_samples > 1:
             sdreads = stdev(reads)  # standard deviation of read counts across samples
+        else:
+            sdreads = 0
 
         # remove intron if read count SD < 0.5 and usage ratios are all 0
-        if sum(usages) == 0 or (sdreads < minreadstd):
+        if sum(usages) == 0 or sdreads < minreadstd:
             N_skipped_introns += 1
             continue
 
@@ -1505,16 +1520,23 @@ if __name__ == "__main__":
         sys.stderr.write("Error: no junction file provided...\n")
         exit(0)
 
-    # Get the junction file list
+    # Get the junction file list with optional sample names
     libl = []
-    for junc in open(options.juncfiles):
-        junc = junc.strip()
+    for line_num, line in enumerate(open(options.juncfiles), 1):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        
+        # Extract filepath for validation
+        filepath = line.split('\t')[0].strip()
+        
         try:
-            open(junc)
+            open(filepath)
         except:
-            sys.stderr.write(f"{junc} does not exist... check your junction files.\n")
+            sys.stderr.write(f"Error on line {line_num}: {filepath} does not exist... check your junction files.\n")
             exit(0)
-        libl.append(junc)
+        
+        libl.append(line)  # Keep the full line (with optional sample name)
 
     chromLst = (
         [f"chr{x}" for x in range(1, 23)]
@@ -1527,13 +1549,46 @@ if __name__ == "__main__":
 
     if not options.keeptemp:
         sys.stderr.write("Remove generated temp files... \n")
-        with open(os.path.join(options.rundir, options.outprefix) + "_sortedlibs") as f:
-            for tmp in [ln.strip() for ln in f.readlines()]:
-                os.remove(tmp)
-        os.remove(os.path.join(options.rundir, options.outprefix) + "_sortedlibs")
+        
+        sortedlibs_file = os.path.join(options.rundir, options.outprefix) + "_sortedlibs"
+        
+        # Check if the sortedlibs file exists before trying to process it
+        if os.path.exists(sortedlibs_file):
+            try:
+                with open(sortedlibs_file) as f:
+                    for tmp in [ln.strip() for ln in f.readlines()]:
+                        if os.path.exists(tmp):
+                            try:
+                                os.remove(tmp)
+                                if options.verbose:
+                                    sys.stderr.write(f"Removed {tmp}\n")
+                            except Exception as e:
+                                sys.stderr.write(f"Warning: Could not remove {tmp}: {e}\n")
+                        else:
+                            if options.verbose:
+                                sys.stderr.write(f"File {tmp} already removed or doesn't exist\n")
+                
+                # Remove the sortedlibs file itself
+                os.remove(sortedlibs_file)
+            except Exception as e:
+                sys.stderr.write(f"Warning: Could not process {sortedlibs_file}: {e}\n")
+        else:
+            sys.stderr.write(f"Warning: {sortedlibs_file} not found\n")
+        
+        # Clean up clustering files if they exist
         if options.cluster == None:
-            os.remove(f"{options.rundir}/clustering/{options.outprefix}_pooled")
-            os.remove(f"{options.rundir}/clustering/{options.outprefix}_refined")
+            pooled_file = f"{options.rundir}/clustering/{options.outprefix}_pooled"
+            refined_file = f"{options.rundir}/clustering/{options.outprefix}_refined"
+            
+            for cleanup_file in [pooled_file, refined_file]:
+                if os.path.exists(cleanup_file):
+                    try:
+                        os.remove(cleanup_file)
+                        if options.verbose:
+                            sys.stderr.write(f"Removed {cleanup_file}\n")
+                    except Exception as e:
+                        sys.stderr.write(f"Warning: Could not remove {cleanup_file}: {e}\n")
+        
         sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
         
     if (options.annot == None) or (options.genome == None):
