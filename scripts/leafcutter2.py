@@ -1402,12 +1402,20 @@ def annotate_noisy(options):
             noisydiag = f"{rundir}/{outPrefix}.cluster_ratios.gz"
             numersdiag = f"{rundir}/{outPrefix}.junction_counts.gz"
         else:
-            noisydiag = fname.replace(
-                "_perind.counts", ".cluster_ratios"
-            )  # eg: run/out_perind.counts.classified.gz
-            numersdiag = fname.replace(
-                "_perind.counts", ".junction_counts"
-            )  # eg: run/out_perind_numers.counts.noise.gz
+            if not options.const:
+                noisydiag = fname.replace(
+                    "_perind.counts", ".cluster_ratios"
+                )  # eg: run/out_perind.counts.classified.gz
+                numersdiag = fname.replace(
+                    "_perind.counts", ".junction_counts"
+                )  # eg: run/out_perind_numers.counts.noise.gz
+            else:
+                noisydiag = fname.replace(
+                    "_perind.constcounts", ".cluster_ratios.const"
+                )  # eg: run/out_perind.counts.classified.gz
+                numersdiag = fname.replace(
+                    "_perind.constcounts", ".junction_counts.const"
+                )  # eg: run/out_perind_numers.counts.noise.gz
 
     foutdiag = gzip.open(noisydiag, "wt")
     foutdiagnumers = gzip.open(numersdiag, "wt")
