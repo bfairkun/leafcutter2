@@ -75,9 +75,8 @@ For classification, LeafCutter2 requires information from a GTF file. Please ens
 - `start_codon`
 - `stop_codon`
 
-In addition, LeafCutter2 requires information on gene and transcript types. These come in the 9th column of a GTF file, but different annotations can use different tags (e.g., Gencode typically uses `gene_type`, while Ensembl uses `gene_biotype`). You can specify what tag your GTF uses by using the following parameters:
-- `--gene_type` (default: `gene_type`)
-- `--transcript_type` (default: `transcript_type`)
+In addition, LeafCutter2 requires information on gene and transcript types. These come in the 9th column of a GTF file, but different annotations can use different tags (e.g., Gencode typically uses `transcript_type`, while Ensembl uses `transcript_biotype`). You can specify what tag your GTF uses by using the following parameters:
+- `--transcript_type` (default: auto-detect)
 
 You can also specify what tag your GTF uses for gene and transcript name (or if you prefer, change from names to gene and transcript IDs) by using:
 - `--gene_name` (default: `gene_name`)
@@ -143,8 +142,6 @@ optional arguments:
   -L, --keepleafcutter1 keep temporary LeafCutter1 files. Useful for running differential splicing 
                         analysis with leafcutter's R package. (default false)
   -P, --keepannot       save parsed annotations to .pckle files. (default false)
-  -g, --gene_type GENE_TYPE
-                        tag for gene type in GTF file (default: auto-detect from gene_type, gene_biotype)
   -t, --transcript_type TRANSCRIPT_TYPE
                         tag for transcript type in GTF file (default: auto-detect from transcript_type, transcript_biotype)
   -gn, --gene_name GENE_NAME
