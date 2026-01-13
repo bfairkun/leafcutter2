@@ -1157,7 +1157,6 @@ def validate_gtf_requirements(gtf_file, options):
     # Attribute alternatives in priority order
     attribute_alternatives = {
         'gene_name': ['gene_name', 'gene_id', 'gene_symbol'],
-        'gene_type': ['gene_type', 'gene_biotype'],
         'transcript_name': ['transcript_name', 'transcript_id'], 
         'transcript_type': ['transcript_type', 'transcript_biotype']
     }
@@ -1490,7 +1489,6 @@ def main(options, libl):
             outprefix=options.outprefix,
             max_juncs=options.max_juncs,
             keepannot=options.keepannot,
-            gene_type=options.gene_type,
             transcript_type=options.transcript_type,
             gene_name=options.gene_name,
             transcript_name=options.transcript_name,
@@ -1668,15 +1666,6 @@ if __name__ == "__main__":
         default=False,
         help="save parsed annotations to .pckle files. (default false)",
     )
-
-    parser.add_argument(
-        "-g",
-        "--gene_type",
-        dest="gene_type",
-        default="",
-        help="tag for transcript type in GTF file (default: auto-detect from gene_type, gene_biotype)",
-    )
-    
     
     parser.add_argument(
         "-t",
