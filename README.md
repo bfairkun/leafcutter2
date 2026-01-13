@@ -144,13 +144,13 @@ optional arguments:
                         analysis with leafcutter's R package. (default false)
   -P, --keepannot       save parsed annotations to .pckle files. (default false)
   -g, --gene_type GENE_TYPE
-                        tag for gene type in GTF file (default gene_type)
-  -t, --transcript_type GENE_TYPE
-                        tag for transcript type in GTF file (default transcript_type)
-  -gn, --gene_type GENE_TYPE
-                        tag for gene name or ID in GTF file (default gene_name)
-  -tn, --transcript_type GENE_TYPE
-                        tag for transcript name or ID in GTF file (default transcript_name)
+                        tag for gene type in GTF file (default: auto-detect from gene_type, gene_biotype)
+  -t, --transcript_type TRANSCRIPT_TYPE
+                        tag for transcript type in GTF file (default: auto-detect from transcript_type, transcript_biotype)
+  -gn, --gene_name GENE_NAME
+                        tag for gene name or ID in GTF file (default: auto-detect from gene_name, gene_id, gene_symbol)
+  -tn, --transcript_name TRANSCRIPT_TYPE
+                        tag for transcript name or ID in GTF file (default: auto-detect from transcript_name, transcript_id)
 ```
 
 ## Pre-clustering splice junctions (optional)
