@@ -295,19 +295,37 @@ def count_bars_until_n_position(sequence, n):
 
 def AddORF_Marks(sequence, StartMarkBasePosition=None, StopMarkBasePosition=None):
     """
-    returns sequence with '^' at StartmarkBasePosition and '*' at StopMarkBasePosition. '|' strings are ignored in base position. 
+    returns sequence with '^' at StartMarkBasePosition and '*' at StopMarkBasePosition.
+    '|' strings are ignored when converting base positions to string indices.
+    If StopMarkBasePosition is None, only insert the start mark.
     """
-    StartMark = '^'
-    StopMark = '*'
-    if StartMarkBasePosition == None:
-        StartMark = ''
-        StartMarkBasePosition = 0
-    if StopMarkBasePosition == None:
-        StopMark = ''
-        StopMarkBasePosition = 0
-    OffsetToStartPosition = count_bars_until_n_position(sequence, StartMarkBasePosition)
-    OffsetToStopPosition = count_bars_until_n_position(sequence, StopMarkBasePosition)
-    return sequence[0:StartMarkBasePosition + OffsetToStartPosition] + StartMark + sequence[(StartMarkBasePosition + OffsetToStartPosition):(StopMarkBasePosition+OffsetToStopPosition)] + StopMark + sequence[(StopMarkBasePosition+OffsetToStopPosition):]
+    # Determine insertion indices in the original string accounting for '|' markers
+    if StartMarkBasePosition is not None and StartMarkBasePosition >= 0:
+        start_offset = count_bars_until_n_position(sequence, StartMarkBasePosition)
+        start_idx = StartMarkBasePosition + start_offset
+    else:
+        start_idx = None
+
+    if StopMarkBasePosition is not None and StopMarkBasePosition >= 0:
+        stop_offset = count_bars_until_n_position(sequence, StopMarkBasePosition)
+        stop_idx = StopMarkBasePosition + stop_offset
+    else:
+        stop_idx = None
+
+    # Build the output in a single pass
+    if start_idx is None and stop_idx is None:
+        return sequence
+    if start_idx is not None and (stop_idx is None or stop_idx < start_idx):
+        # Insert only start, or start before stop (no overlap)
+        return sequence[:start_idx] + '^' + sequence[start_idx:] if stop_idx is None else (
+            sequence[:start_idx] + '^' + sequence[start_idx:stop_idx] + '*' + sequence[stop_idx:]
+        )
+    elif start_idx is None and stop_idx is not None:
+        # Only stop mark
+        return sequence[:stop_idx] + '*' + sequence[stop_idx:]
+    else:
+        # start_idx <= stop_idx: insert both
+        return sequence[:start_idx] + '^' + sequence[start_idx:stop_idx] + '*' + sequence[stop_idx:]
 AddORF_Marks("||ATG|G|ATAGG", 1, 5)
 
 def extract_sequence(self, fasta_obj, AddMarksForORF=False):
