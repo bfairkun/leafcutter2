@@ -1409,6 +1409,7 @@ def annotate_noisy(options):
             sdreads = stdev(reads)  # standard deviation of read counts across samples
         else:
             sdreads = 0
+            minreadstd = -1
 
         # remove intron if read count SD < 0.5 and usage ratios are all 0
         if sum(usages) == 0 or sdreads < minreadstd:
