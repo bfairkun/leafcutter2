@@ -28,6 +28,9 @@ import logging
 import tempfile
 import os
 from Bio import bgzf
+from Bio import motifs
+from Bio.Seq import Seq
+import random
 
 def reorder_gtf(gtf_stringio, output_gtf, mode='w'):
     """Reorder GTF lines by gene and transcript, ensuring correct hierarchical sorting,
@@ -129,6 +132,155 @@ def run_bedparse_gtf2bed(gtf_file, *args, n=None):
         return None
     return result.stdout
 
+def kozak_motif_from_counts(counts_dict=None, pseudocount=0.5):
+    """
+    Build a Kozak motif from a counts matrix (dict of lists for A,C,G,T).
+    Returns (motif, pwm, pssm).
+    """
+    if counts_dict is None:
+        counts_dict = {
+            'A': [3620.0, 3166.0, 4450.0, 8952.0, 5277.0, 3288.0, 18870.0, 0.0, 2.0, 3973.0],
+            'C': [4423.0, 6320.0, 7562.0, 1691.0, 7700.0, 8999.0, 25.0, 3.0, 0.0, 2652.0],
+            'G': [7701.0, 5952.0, 4862.0, 7331.0, 3652.0, 5302.0, 2.0, 0.0, 18895.0, 9712.0],
+            'T': [3155.0, 3461.0, 2025.0, 925.0, 2270.0, 1310.0, 2.0, 18896.0, 2.0, 2562.0],
+        }
+
+    # Validate
+    lengths = {len(v) for v in counts_dict.values()}
+    if len(lengths) != 1:
+        raise ValueError("All nucleotide lists must have the same length")
+    for b in ("A","C","G","T"):
+        if b not in counts_dict:
+            raise ValueError(f"Missing base '{b}' in counts_dict")
+
+    # Use PositionSpecificCounts (Biopython >= 1.78)
+    cnt = matrix.PositionSpecificCounts("ACGT", counts_dict)
+    m = motifs.Motif(cnt)
+    pwm = cnt.normalize(pseudocounts=pseudocount)
+    pssm = pwm.log_odds()
+    return m, pwm, pssm
+
+def build_pssm_from_counts_by_sampling(counts_dict, n_instances=500, seed=1):
+    """
+    Build a PSSM by sampling sequences from a per-position nucleotide counts dict.
+    counts_dict: {'A': [...], 'C': [...], 'G': [...], 'T': [...]}, all lists same length (e.g., 10 for Kozak)
+    n_instances: number of synthetic sequences to sample
+    seed: RNG seed for reproducibility
+    Returns (motif, pwm, pssm)
+    """
+    # Validate
+    if not counts_dict or any(b not in counts_dict for b in ('A','C','G','T')):
+        raise ValueError("counts_dict must include A,C,G,T")
+    lengths = {len(v) for v in counts_dict.values()}
+    if len(lengths) != 1:
+        raise ValueError("All nucleotide lists must have same length")
+    L = lengths.pop()
+
+    # Build per-position population lists for random choice
+    # To keep memory modest, normalize counts to probabilities
+    probs = []
+    for i in range(L):
+        a = counts_dict['A'][i]
+        c = counts_dict['C'][i]
+        g = counts_dict['G'][i]
+        t = counts_dict['T'][i]
+        total = a + c + g + t
+        # Guard against zero total
+        if total <= 0:
+            probs.append((('A', 0.25), ('C', 0.25), ('G', 0.25), ('T', 0.25)))
+        else:
+            probs.append((
+                ('A', a/total),
+                ('C', c/total),
+                ('G', g/total),
+                ('T', t/total)
+            ))
+
+    random.seed(seed)
+    seqs = []
+    for _ in range(n_instances):
+        s = []
+        for i in range(L):
+            bases, p = zip(*probs[i])
+            # random.choices is available in Python 3.6+
+            s.append(random.choices(bases, weights=p, k=1)[0])
+        seqs.append(Seq(''.join(s)))
+
+    m = motifs.create(seqs)
+    pwm = m.counts.normalize(pseudocounts=0.5)
+    pssm = pwm.log_odds()
+    return m, pwm, pssm
+
+def load_jaspar_pfm_pssm(pfm_path, pseudocount=0.5):
+    """Load a JASPAR PFM using Biopython and return (pwm, pssm)."""
+    with open(pfm_path) as handle:
+        motif_list = list(motifs.parse(handle, "jaspar"))
+    if not motif_list:
+        raise ValueError("No motifs parsed from JASPAR PFM")
+    m = motif_list[0]
+    pwm = m.counts.normalize(pseudocounts=pseudocount)
+    pssm = pwm.log_odds()
+    return pwm, pssm
+
+def extract_kozak_seq(marked_sequence, before=6, after=4):
+    """
+    Extract sequence surrounding '^' from `before` nt before the marker to `after` nt after the marker.
+    Removes '|' and '*' before computing indices. Returns the nucleotide string (no markers).
+    If '^' is not present, returns empty string.
+
+    Example:
+        marked = "AA|AA|^ATG|GGC*|TT"
+        extract_kozak_seq(marked, before=6, after=1) -> "AAATG"  (depending on exact positions)
+    """
+    if '^' not in marked_sequence:
+        return ""
+
+    # Remove splice-junction markers and stop markers but keep the '^' so we can locate it
+    cleaned = marked_sequence.replace('|', '').replace('*', '')
+
+    caret_idx = cleaned.find('^')
+    if caret_idx == -1:
+        return ""
+
+    start = max(0, caret_idx - before)
+    end = min(len(cleaned), caret_idx + 1 + after)  # +1 to include the base at '^' position
+
+    window = cleaned[start:end]
+    # Remove the caret before returning the nucleotide sequence
+    return window.replace('^', '')
+
+def score_kozak_window(marked_sequence, pssm=None, before=6, after=4):
+    """
+    Extract window around '^' and score with provided PSSM.
+    Returns a 3-decimal string; returns 'NA' on any error and logs a helpful message.
+    """
+    try:
+        window = extract_kozak_seq(marked_sequence, before=before, after=after)
+        if not window:
+            logging.debug("score_kozak_window: no '^' marker found or empty window")
+            return 'NA'
+        if len(window) != 10:
+            logging.debug(f"score_kozak_window: invalid window length {len(window)} (expected 10)")
+            return 'NA'
+        window = window.upper()
+        if any(ch not in 'ACGT' for ch in window):
+            logging.debug(f"score_kozak_window: non-ACGT character in window '{window}'")
+            return 'NA'
+        if pssm is None:
+            logging.debug("score_kozak_window: PSSM is None (not initialized)")
+            return 'NA'
+        s = pssm.calculate(window)
+        # Biopython returns scalar when len(window)==motif_len; else list of sliding scores
+        if isinstance(s, (list, tuple)):
+            if not s:
+                logging.debug("score_kozak_window: PSSM.calculate returned empty scores list")
+                return 'NA'
+            s = s[0]
+        return f"{s:.3f}"
+    except Exception as e:
+        logging.debug(f"score_kozak_window: exception during scoring ({e})")
+        return 'NA'
+
 def count_bars_until_n_position(sequence, n):
     bar_count = 0
     non_bar_count = 0
@@ -143,19 +295,37 @@ def count_bars_until_n_position(sequence, n):
 
 def AddORF_Marks(sequence, StartMarkBasePosition=None, StopMarkBasePosition=None):
     """
-    returns sequence with '^' at StartmarkBasePosition and '*' at StopMarkBasePosition. '|' strings are ignored in base position. 
+    returns sequence with '^' at StartMarkBasePosition and '*' at StopMarkBasePosition.
+    '|' strings are ignored when converting base positions to string indices.
+    If StopMarkBasePosition is None, only insert the start mark.
     """
-    StartMark = '^'
-    StopMark = '*'
-    if StartMarkBasePosition == None:
-        StartMark = ''
-        StartMarkBasePosition = 0
-    if StopMarkBasePosition == None:
-        StopMark = ''
-        StopMarkBasePosition = 0
-    OffsetToStartPosition = count_bars_until_n_position(sequence, StartMarkBasePosition)
-    OffsetToStopPosition = count_bars_until_n_position(sequence, StopMarkBasePosition)
-    return sequence[0:StartMarkBasePosition + OffsetToStartPosition] + StartMark + sequence[(StartMarkBasePosition + OffsetToStartPosition):(StopMarkBasePosition+OffsetToStopPosition)] + StopMark + sequence[(StopMarkBasePosition+OffsetToStopPosition):]
+    # Determine insertion indices in the original string accounting for '|' markers
+    if StartMarkBasePosition is not None and StartMarkBasePosition >= 0:
+        start_offset = count_bars_until_n_position(sequence, StartMarkBasePosition)
+        start_idx = StartMarkBasePosition + start_offset
+    else:
+        start_idx = None
+
+    if StopMarkBasePosition is not None and StopMarkBasePosition >= 0:
+        stop_offset = count_bars_until_n_position(sequence, StopMarkBasePosition)
+        stop_idx = StopMarkBasePosition + stop_offset
+    else:
+        stop_idx = None
+
+    # Build the output in a single pass
+    if start_idx is None and stop_idx is None:
+        return sequence
+    if start_idx is not None and (stop_idx is None or stop_idx < start_idx):
+        # Insert only start, or start before stop (no overlap)
+        return sequence[:start_idx] + '^' + sequence[start_idx:] if stop_idx is None else (
+            sequence[:start_idx] + '^' + sequence[start_idx:stop_idx] + '*' + sequence[stop_idx:]
+        )
+    elif start_idx is None and stop_idx is not None:
+        # Only stop mark
+        return sequence[:stop_idx] + '*' + sequence[stop_idx:]
+    else:
+        # start_idx <= stop_idx: insert both
+        return sequence[:start_idx] + '^' + sequence[start_idx:stop_idx] + '*' + sequence[stop_idx:]
 AddORF_Marks("||ATG|G|ATAGG", 1, 5)
 
 def extract_sequence(self, fasta_obj, AddMarksForORF=False):
@@ -392,77 +562,58 @@ def find_uorfs(seq):
     return [seq[o_start:o_end+1] for _, _, o_start, o_end in final_hits]
 
 
-def Analyze_uORFs(sequence, bedline):
+def Analyze_uORFs(sequence, bedline, pssm=None):
     """
-    Analyze upstream ORFs in a sequence marked with '^mainORF*'
-    Uses find_uorfs function for ORF detection, then processes results
-    
-    Args:
-        sequence (str): Sequence with '^' marking main ORF start and '*' marking end
-        bedline: bedparse.bedline object for coordinate conversion
-    
+    Analyze upstream ORFs in a sequence marked with '^' for main ORF start and '*' for main ORF stop.
+    Returns two genomic position fields (starts and stops) plus classifications, lengths (aa) and relative positions.
+
     Returns:
-        tuple: (genomic_positions, classifications, lengths, relative_positions)
+        tuple: (uorf_start_genomic_positions, uorf_stop_genomic_positions, classifications, lengths, relative_positions, uorf_kozak_scores)
+               each element is a semicolon-separated string or empty string if none.
     """
-    
-    # Find main ORF position for relative calculations
-    main_orf_match = re.search(r'\^', sequence)
-    if not main_orf_match:
-        return "", "", "", ""
-    
-    main_orf_start = main_orf_match.start()
-    
-    # Use existing find_uorfs function to get all upstream ORFs
-    uorf_sequences = find_uorfs(sequence)
-    
-    if not uorf_sequences:
-        return "", "", "", ""
-    
-    # Process each uORF
-    genomic_positions = []
-    classifications = []
-    lengths = []
-    relative_positions = []
-    
-    # Calculate main ORF clean position (without markers) for relative positioning
-    clean_main_start = len(re.sub(r'[\^\|\*]', '', sequence[:main_orf_start]))
-    
-    for uorf_seq in uorf_sequences:
-        # Find where this uORF starts in the original sequence
-        uorf_start_pos = sequence.find(uorf_seq)
-        uorf_end_pos = uorf_start_pos + len(uorf_seq)
-        
-        # Classify based on whether uORF ends before main ORF
-        if uorf_end_pos <= main_orf_start:
-            classification = "uORF"
-        else:
-            classification = "Overlapping_uORF"
-        
-        # Calculate clean transcript position (removing markers)
-        clean_transcript_pos = len(re.sub(r'[\^\|\*]', '', sequence[:uorf_start_pos]))
-        
-        # Convert to genomic coordinates
-        genomic_pos = get_absolute_pos(bedline, clean_transcript_pos)
-        
-        # Calculate relative position to main ORF start
-        relative_pos = clean_transcript_pos - clean_main_start
-        
-        # Calculate length in amino acids
-        clean_uorf_seq = re.sub(r'[\^\|\*]', '', uorf_seq)
-        aa_length = len(clean_uorf_seq) // 3
-        
-        # Store results as strings
-        genomic_positions.append(str(int(genomic_pos)))
-        classifications.append(str(classification))
-        lengths.append(str(int(aa_length)))
-        relative_positions.append(str(int(relative_pos)))
-    
-    # Return semicolon-separated strings instead of comma-separated
+    try:
+        main_orf_index = sequence.index('^')
+    except ValueError:
+        return "", "", "", "", "", ""
+    uorf_seqs = find_uorfs(sequence)
+    if not uorf_seqs:
+        return "", "", "", "", "", ""
+    clean_main_start = len(re.sub(r'[\^\|\*]', '', sequence[:main_orf_index]))
+    starts, stops, classes, lengths, relpos, scores = [], [], [], [], [], []
+    for uorf in uorf_seqs:
+        uorf_start_marked = sequence.find(uorf)
+        uorf_end_marked = uorf_start_marked + len(uorf)
+        classification = "uORF" if uorf_end_marked <= main_orf_index else "Overlapping_uORF"
+        clean_start = len(re.sub(r'[\^\|\*]', '', sequence[:uorf_start_marked]))
+        clean_end = len(re.sub(r'[\^\|\*]', '', sequence[:uorf_end_marked])) - 1
+        try:
+            gstart = get_absolute_pos(bedline, clean_start)
+        except Exception:
+            gstart = None
+        try:
+            gstop = get_absolute_pos(bedline, clean_end)
+        except Exception:
+            gstop = None
+        relative_position = clean_start - clean_main_start
+        aa_len = len(re.sub(r'[\^\|\*]', '', uorf)) // 3
+        starts.append(str(int(gstart)) if gstart is not None else "")
+        stops.append(str(int(gstop)) if gstop is not None else "")
+        classes.append(classification)
+        lengths.append(str(int(aa_len)))
+        relpos.append(str(int(relative_position)))
+        # build a temporary sequence with '^' at uORF start for scoring
+        try:
+            temp_seq = AddORF_Marks(sequence.replace('^', ''), StartMarkBasePosition=clean_start, StopMarkBasePosition=None)
+            scores.append(score_kozak_window(temp_seq, pssm=pssm))
+        except Exception:
+            scores.append('NA')
     return (
-        ";".join(genomic_positions) if genomic_positions else "",
-        ";".join(classifications) if classifications else "", 
+        ";".join(starts) if any(starts) else "",
+        ";".join(stops) if any(stops) else "",
+        ";".join(classes) if classes else "",
         ";".join(lengths) if lengths else "",
-        ";".join(relative_positions) if relative_positions else ""
+        ";".join(relpos) if relpos else "",
+        ";".join(scores) if scores else ""
     )
 
 def Is_bedline_complete(bedline):
@@ -796,10 +947,12 @@ def parse_args(args=None):
     parser.add_argument('-NMDetectiveB_coding_threshold', dest='NMDetectiveB_coding_threshold', type=int, choices=[1,2,3,4,5,6,7], default=5, help='NMDetectiveB classifies each transcript into 7 ordinal categories, from the most coding potential to the least coding potential: (1) Last exon (2) Start proximal (3) 50nt rule (4) Long exon (5) Trigger NMD (6) No stop (7) No CDS. Transcripts with classified as this NMDetective value or greater will be assigned transcript_type attribute value of "noncoding", while others will be value of "protein_coding". default: "%(default)s"')
     parser.add_argument('-translation_approach', dest='translation_approach', choices=['A', 'B', 'C', 'D', 'E', 'F'], default='B', help='Approach to use NMDetective to annotate CDS in output for genes where gene_biotype/gene_type == "protein_coding", some of which may not have annotated CDS in input (eg transcript_type=="processed_transcript"). Possible approaches: (A) using annotated ORF if ORF is present in input with 5UTR and 3UTR. If 3UTR is present and 5UTR is absent (suggesting stop codon is annotated but start codon may be outside of the transcript bounds), search for longest ORF within transcript bounds where a start codon is not required at the beginning of ORF. Similarly, if 5UTR is present but 3UTR is absent, search for longest ORF without requiring stop codon. If neither UTR is present, or if no CDS is annotated in input, search for longest ORF, not requiring start or stop within transcript bounds. I think this approach might be useful to correctly identify the ORF, even if transcript bounds are not accurate, but it has the downside that true "processed_transcripts" with a internal TSS that eliminates the correct start codon, may be erronesously be classified as "Last exon" (ie productive) transcripts by NMDFinderB. (B) Use only annotated CDS. In effect, output gtf is the same except start_codon and stop_codon features are added even if not present in input. This would be useful for dealing with "processed_transcripts" properly by NMDFinder, but I havent checked whether CDS annotations in poorly annotated species (eg lamprey, chicken, etc) are reasonable, which could be a problem for Yangs script. (C) use annotated CDS if present, and use first ATG if no CDS present (minimum ORF length controlled by --min_new_ORF_length). (D) Use first ORF regardless of annotation (minimum ORF length controlled by --min_new_ORF_length). (E) Use longest ORF with both start and stop codons required (minimum ORF length controlled by --min_new_ORF_length). (F) Use longest ORF with start codon required but no stop codon required (minimum ORF length controlled by --min_new_ORF_length) - useful for detecting no-stop decay in full-length reads.')
     parser.add_argument('--min_new_ORF_length', dest='min_new_ORF_length', type=int, default=50, help='Minimum ORF length (in codons) for newly predicted ORFs in translation approaches C, D, E, and F. Only relevant when using translation approach C, D, E, or F. default: %(default)s')
-    parser.add_argument('--include_uorf_analysis', action='store_true', help='Include upstream ORF (uORF) analysis in output. Adds uORF_genomic_positions, uORF_classifications, uORF_lengths_aa, and uORF_relative_positions attributes.', default=False)
+    parser.add_argument('--include_uorf_analysis', action='store_true', help='Include upstream ORF (uORF) analysis in output. Adds uORF_start_genomic_positions, uORF_stop_genomic_positions, uORF_classifications, uORF_lengths_aa, and uORF_relative_positions attributes.', default=False)
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
     parser.add_argument('--sort_output', action='store_true', default=False,
                         help='Sort outputs before writing: BED12 will be coordinate-sorted; GTF will be sorted by gene, then transcript, then features within transcript. If not set, BED12 preserves read order and GTF preserves construction order.')
+    parser.add_argument('--kozak_jaspar_pfm', dest='kozak_jaspar_pfm', default=None,
+                        help='Optional path to a JASPAR-like PFM file to override the default Kozak motif. If provided, its PWM/PSSM will be used for scoring.')
     return parser.parse_args(args)
 
 
@@ -929,15 +1082,35 @@ def main(args=None):
                            "ThreeUTR_nEx_AfterFirst50", "CDSLen", "Introns"]
         bed_header_fields.extend(extra_calc_attrs)
         if args.include_uorf_analysis:
-            bed_header_fields.extend(["uORF_genomic_positions", "uORF_classifications", "uORF_lengths_aa", "uORF_relative_positions"])
-        if extra_attributes:
-            bed_header_fields.extend(extra_attributes)
+            # Include separate start and stop genomic position columns for uORFs
+            bed_header_fields.extend(["uORF_start_genomic_positions", "uORF_stop_genomic_positions", "uORF_classifications", "uORF_lengths_aa", "uORF_relative_positions", "uORF_kozak_log_odds", "start_codon_kozak_log_odds"])
+        else:
+            bed_header_fields.extend(["start_codon_kozak_log_odds"])
         bed_header_line = "#" + "\t".join(bed_header_fields) + "\n"
         if sort_bed:
             bed_lines = []
         else:
             bed_out_fh = _open_bgzip_aware(args.bed12_out, text_mode=True)
             bed_out_fh.write(bed_header_line)
+
+    # Initialize Kozak PSSM once (override with JASPAR if provided)
+    pssm = None
+    try:
+        if args.kozak_jaspar_pfm:
+            _, pssm = load_jaspar_pfm_pssm(args.kozak_jaspar_pfm)
+            logging.info(f"Loaded Kozak PFM from {args.kozak_jaspar_pfm}")
+        else:
+            # Use your empirical counts to synthesize instances and build PSSM
+            counts_dict = {
+                'A': [3620.0, 3166.0, 4450.0, 8952.0, 5277.0, 3288.0, 18870.0, 0.0, 2.0, 3973.0],
+                'C': [4423.0, 6320.0, 7562.0, 1691.0, 7700.0, 8999.0, 25.0, 3.0, 0.0, 2652.0],
+                'G': [7701.0, 5952.0, 4862.0, 7331.0, 3652.0, 5302.0, 2.0, 0.0, 18895.0, 9712.0],
+                'T': [3155.0, 3461.0, 2025.0, 925.0, 2270.0, 1310.0, 2.0, 18896.0, 2.0, 2562.0],
+            }
+            _, _, pssm = build_pssm_from_counts_by_sampling(counts_dict, n_instances=800, seed=1)
+    except Exception as e:
+        logging.error(f"Failed to initialize Kozak PSSM: {e}")
+        pssm = None
 
     for i,l in enumerate(bed12.splitlines()):
         if i >= 0:
@@ -964,57 +1137,61 @@ def main(args=None):
             transcript_out = transcript
             NMDFinderB = "NA"
             #Determine NMDetectiveB classification
-            if args.translation_approach == 'A':
-                if transcript.cds() and transcript.utr(which=5) and transcript.utr(which=3):
-                    source = "input_gtf"
+            try:
+                if args.translation_approach == 'A':
+                    if transcript.cds() and transcript.utr(which=5) and transcript.utr(which=3):
+                        source = "input_gtf"
+                        sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
+                    elif transcript.cds() and transcript.utr(which=5) and not transcript.utr(which=3):
+                        source = "LongestORF_NoStopRequired"
+                        sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
+                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                    elif transcript.cds() and not transcript.utr(which=5) and transcript.utr(which=3):
+                        source = "LongestORF_NoStartRequired"
+                        sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
+                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                    else:
+                        source = "LongestORF_NeitherRequired"
+                        sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=False, require_STOP = False)
+                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                    NMDFinderB = get_NMD_detective_B_classification(sequence)
+                elif args.translation_approach == 'B':
                     sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                elif transcript.cds() and transcript.utr(which=5) and not transcript.utr(which=3):
-                    source = "LongestORF_NoStopRequired"
-                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
-                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                elif transcript.cds() and not transcript.utr(which=5) and transcript.utr(which=3):
-                    source = "LongestORF_NoStartRequired"
-                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
-                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                else:
-                    source = "LongestORF_NeitherRequired"
-                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=False, require_STOP = False)
-                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                NMDFinderB = get_NMD_detective_B_classification(sequence)
-            elif args.translation_approach == 'B':
-                sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                NMDFinderB = get_NMD_detective_B_classification(sequence)
-            elif args.translation_approach == 'C':
-                if transcript.cds():
-                    sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                    source = "input_gtf"
-                else:
+                    NMDFinderB = get_NMD_detective_B_classification(sequence)
+                elif args.translation_approach == 'C':
+                    if transcript.cds():
+                        sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
+                        source = "input_gtf"
+                    else:
+                        source = "FirstORF_NoStopRequired"
+                        sequence = insert_marks_for_first_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False, min_ORF_len = args.min_new_ORF_length)
+                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                    NMDFinderB = get_NMD_detective_B_classification(sequence)
+                elif args.translation_approach == 'D':
                     source = "FirstORF_NoStopRequired"
                     sequence = insert_marks_for_first_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False, min_ORF_len = args.min_new_ORF_length)
                     thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
                     transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                NMDFinderB = get_NMD_detective_B_classification(sequence)
-            elif args.translation_approach == 'D':
-                source = "FirstORF_NoStopRequired"
-                sequence = insert_marks_for_first_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False, min_ORF_len = args.min_new_ORF_length)
-                thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                NMDFinderB = get_NMD_detective_B_classification(sequence)
-            elif args.translation_approach == 'E':
-                source = "LongestORF_WithMinLength"
-                sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=True, min_ORF_len=args.min_new_ORF_length)
-                thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                NMDFinderB = get_NMD_detective_B_classification(sequence)
-            elif args.translation_approach == 'F':
-                source = "LongestORF_NoStopRequired"
-                sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=False, min_ORF_len=args.min_new_ORF_length)
-                thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                NMDFinderB = get_NMD_detective_B_classification(sequence)
+                    NMDFinderB = get_NMD_detective_B_classification(sequence)
+                elif args.translation_approach == 'E':
+                    source = "LongestORF_WithMinLength"
+                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=True, min_ORF_len=args.min_new_ORF_length)
+                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                    NMDFinderB = get_NMD_detective_B_classification(sequence)
+                elif args.translation_approach == 'F':
+                    source = "LongestORF_NoStopRequired"
+                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=False, min_ORF_len=args.min_new_ORF_length)
+                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                    NMDFinderB = get_NMD_detective_B_classification(sequence)
+            except NameError as e:
+                logging.error(f"NameError encountered while processing transcript {transcript.name}: {e}")
+                continue
             NMDFinderB_NoWhitespace = NMDFinderB.replace(' ', '_')
             NMDFinderB_number = get_NMD_detective_B_classification_number(NMDFinderB)
             # Determine transcript_type
@@ -1036,11 +1213,16 @@ def main(args=None):
 
             # Conditionally add upstream ORF analysis
             if args.include_uorf_analysis:
-                uorf_genomic_pos, uorf_classes, uorf_lengths, uorf_relative_pos = Analyze_uORFs(sequence, transcript_out)
-                transcript_attributes += f' tag "uORF_genomic_positions":"{uorf_genomic_pos}";'
+                uorf_start_genomic_pos, uorf_stop_genomic_pos, uorf_classes, uorf_lengths, uorf_relative_pos, uorf_kozak_scores = Analyze_uORFs(sequence, transcript_out, pssm=pssm)
+                transcript_attributes += f' tag "uORF_start_genomic_positions":"{uorf_start_genomic_pos}";'
+                transcript_attributes += f' tag "uORF_stop_genomic_positions":"{uorf_stop_genomic_pos}";'
                 transcript_attributes += f' tag "uORF_classifications":"{uorf_classes}";'
                 transcript_attributes += f' tag "uORF_lengths_aa":"{uorf_lengths}";'
                 transcript_attributes += f' tag "uORF_relative_positions":"{uorf_relative_pos}";'
+                transcript_attributes += f' tag "uORF_kozak_log_odds":"{uorf_kozak_scores}";'
+            # Always compute main start_codon Kozak score
+            start_codon_kozak = score_kozak_window(sequence, pssm=pssm)
+            transcript_attributes += f' tag "start_codon_kozak_log_odds":"{start_codon_kozak}";'
 
             # Write to GTF only if GTF output is enabled
             if args.gtf_out:
@@ -1054,8 +1236,9 @@ def main(args=None):
                 bed_extra_fields = [gene_id, transcript_id, gene_type, transcript_type_out, NMDFinderB_NoWhitespace]
                 bed_extra_fields.extend([str(v) for v in extra_calculated_transcript_attributes.values()])
                 if args.include_uorf_analysis:
-                    bed_extra_fields.extend([uorf_genomic_pos, uorf_classes, uorf_lengths, uorf_relative_pos])
-                bed_extra_fields.extend(extra_attribute_values)
+                    bed_extra_fields.extend([uorf_start_genomic_pos, uorf_stop_genomic_pos, uorf_classes, uorf_lengths, uorf_relative_pos, uorf_kozak_scores, start_codon_kozak])
+                else:
+                    bed_extra_fields.extend([start_codon_kozak])
                 bed_line = bed12_formatted_bedline(transcript_out, 
                                                    color=get_NMD_detective_B_classification_color(NMDFinderB), 
                                                    attributes_str='\t' + '\t'.join(bed_extra_fields))
@@ -1137,5 +1320,3 @@ if __name__ == "__main__":
         main("-i scratch/PRNP.bed -input_type bed12 -bed12_column_indexes 4 4 4 4 -fa /project2/yangili1/bjf79/ReferenceGenomes/GRCh38_GencodeRelease44Comprehensive/Reference.fa -bed12_out scratch/PRNP.translated.bed -v -infer_gene_type_approach B -infer_transcript_type_approach C --include_uorf_analysis -translation_approach D".split(' '))
     else:
         main()
-
-# python Reformat_gtf.py -i /project2/yangili1/bjf79/ReferenceGenomes/GRCh38_GencodeRelease44Comprehensive/Reference.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Human_UCSC.hg38_GencodeComprehensive46/Reference.fa -bed12_out ../../../scratch/test.bed -n 10000 -v -transcript_name_attribute_name transcript_id -gene_name_attribute_name gene_name -infer_gene_type_approach B
