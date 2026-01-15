@@ -19,7 +19,7 @@ import ForwardSpliceJunctionClassifier as sjcf
 import pandas as pd
 import pyfastx
 import logging
-import Reformat_gtf
+import add_on_scripts.Reformat_gtf
 import shlex
 
 logger = logging.getLogger(__name__)
@@ -846,7 +846,7 @@ def sort_junctions(libl, options):
                 if chrom not in by_chrom:
                     # if refined exon chrom is not found in junc file, write 0/cluster_total
                     buf.append(f"{chromID}:{start}:{end}:clu_{clu}_{strand} 0/{tot}\n")
-                elif (start, end) in by_chrom:
+                elif (start, end) in by_chrom[chrom]:
                     # if refind exon is in junc file, write exon reads / cluster_total
                     buf.append(
                         f"{chromID}:{start}:{end}:clu_{clu}_{strand} {by_chrom[chrom][(start,end)]}/{tot}\n"
@@ -1452,6 +1452,7 @@ def annotate_noisy(options):
             sdreads = stdev(reads)  # standard deviation of read counts across samples
         else:
             sdreads = 0
+            minreadstd = -1
 
         # remove intron if read count SD < 0.5 and usage ratios are all 0
         if sum(usages) == 0 or sdreads < minreadstd:
