@@ -18,6 +18,19 @@ from datetime import datetime
 import ForwardSpliceJunctionClassifier as sjcf
 import pandas as pd
 import pyfastx
+import logging
+import Reformat_gtf
+import shlex
+
+logger = logging.getLogger(__name__)
+
+def setup_logging(level_name: str, verbose_flag: bool):
+    # Resolve level precedence: explicit level overrides verbose flag
+    level = getattr(logging, level_name.upper(), None)
+    if level is None:
+        level = logging.DEBUG if verbose_flag else logging.INFO
+    logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger.debug(f"Logger initialized at level: {logging.getLevelName(level)}")
 
 
 def natural_sort(l: list):
@@ -126,7 +139,7 @@ def pool_junc_reads(flist, options):
     rundir = options.rundir
     maxIntronLen = int(options.maxintronlen)
     checkchrom = options.checkchrom
-    print(f"Max Intron Length: {maxIntronLen}")
+    logger.info(f"Max Intron Length: {maxIntronLen}")
     outFile = f"{rundir}/clustering/{outPrefix}_pooled"
 
     if not os.path.exists(rundir):
@@ -143,7 +156,7 @@ def pool_junc_reads(flist, options):
             continue
 
         if options.verbose:
-            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} scanning {lib}...\n")
+            logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} scanning {lib}...\n")
 
         if ".gz" in lib:
             F = gzip.open(lib)
@@ -157,7 +170,7 @@ def pool_junc_reads(flist, options):
 
             lnsplit = ln.split()
             if len(lnsplit) < 6:
-                sys.stderr.write(f"Error in {lib} \n")
+                logger.error(f"Error in {lib} \n")
                 continue
 
             if len(lnsplit) == 12:  # 12 fields regtools junc file
@@ -176,7 +189,7 @@ def pool_junc_reads(flist, options):
                     blockStarts,
                 ) = lnsplit
                 if int(blockCount) > 2:
-                    print(ln, "ignored...")
+                    logger.debug("ignored junction with blockCount>2")
                     continue
                 Aoff, Boff = blockSize.split(",")[:2]
                 A, B = int(A) + int(Aoff), int(B) - int(Boff)  # get intron
@@ -211,7 +224,7 @@ def pool_junc_reads(flist, options):
 
     with open(outFile, "w") as fout:
         Ncluster = 0
-        sys.stderr.write("Parsing...\n")
+        logger.info("Parsing pooled junctions...")
 
         for chrom in by_chrom:
             read_ks = [
@@ -219,7 +232,7 @@ def pool_junc_reads(flist, options):
             ]  # read-keys, require junction reads > 3
             read_ks.sort()  # sort read-keys: (start, end)
 
-            sys.stderr.write(f"{chrom[0]}:{chrom[1]}..\n")
+            logger.info(f"{chrom[0]}:{chrom[1]}..\n")
 
             if read_ks:
                 clu = cluster_intervals(read_ks)[
@@ -236,7 +249,7 @@ def pool_junc_reads(flist, options):
                         fout.write(buf + "\n")
                         Ncluster += 1
 
-        sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Wrote {Ncluster} clusters..\n")
+        logger.info(f"Wrote {Ncluster} clusters..\n")
 
 
 def refine_linked(clusters):
@@ -410,7 +423,7 @@ def refine_clusters(options):
     outFile = f"{rundir}/clustering/{outPrefix}_refined"
     fout = open(outFile, "w")
 
-    sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Refine clusters from {inFile}...\n")
+    logger.info(f"Refine clusters from {inFile}...\n")
 
     Ncl = 0
     for ln in open(inFile):  # pooled juncs
@@ -447,7 +460,7 @@ def refine_clusters(options):
                         buf += f"{interval[0]}:{interval[1]}" + f":{count}" + " "
                     Ncl += 1
                     fout.write(buf + "\n")
-    sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Split into {Ncl} clusters...\n")
+    logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Split into {Ncl} clusters...\n")
     fout.close()
 
 
@@ -478,7 +491,7 @@ def addlowusage(options):
 
     global chromLst
 
-    sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Add low usage introns...\n")
+    logger.info(f"Add low usage introns...\n")
 
     outPrefix = options.outprefix
     rundir = options.rundir
@@ -658,7 +671,7 @@ def sort_junctions(libl, options):
         refined_cluster = (
             f"{rundir}/clustering/{outPrefix}_clusters"  # note refined noisy intron clusters
         )
-        sys.stderr.write(f"\nUsing {refined_cluster} as refined cluster...\n")
+        logger.info(f"Using {refined_cluster} as refined cluster...")
     else:
         refined_cluster = options.cluster
 
@@ -719,10 +732,10 @@ def sort_junctions(libl, options):
         fout_runlibs.write(foutName + "\n")  # e.g. 'test/gtex_w_clu/gtex_sortedlibs'
 
         if options.verbose:
-            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Sorting {sample_name}..\n")
+            logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Sorting {sample_name}..\n")
         if len(merges[sample_name]) > 1:
             if options.verbose:
-                sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {' '.join(merges[sample_name])}...\n")
+                logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {' '.join(merges[sample_name])}...\n")
         else:
             pass
         fout = gzip.open(
@@ -749,7 +762,7 @@ def sort_junctions(libl, options):
                 lnsplit = ln.split()
 
                 if len(lnsplit) < 6:
-                    sys.stderr.write(f"Error in {lib} \n")
+                    logger.error(f"Error in {lib} \n")
                     continue
 
                 if len(lnsplit) == 12:
@@ -768,7 +781,7 @@ def sort_junctions(libl, options):
                         blockStarts,
                     ) = lnsplit
                     if int(blockCount) > 2:
-                        print(ln, "ignored...")
+                        logger.debug("ignored junction with blockCount>2")
                         continue
                     Aoff, Boff = blockSize.split(",")[:2]
                     A, B = int(A) + int(Aoff), int(B) - int(Boff)
@@ -833,7 +846,7 @@ def sort_junctions(libl, options):
                 if chrom not in by_chrom:
                     # if refined exon chrom is not found in junc file, write 0/cluster_total
                     buf.append(f"{chromID}:{start}:{end}:clu_{clu}_{strand} 0/{tot}\n")
-                elif (start, end) in by_chrom[chrom]:
+                elif (start, end) in by_chrom:
                     # if refind exon is in junc file, write exon reads / cluster_total
                     buf.append(
                         f"{chromID}:{start}:{end}:clu_{clu}_{strand} {by_chrom[chrom][(start,end)]}/{tot}\n"
@@ -881,7 +894,7 @@ def merge_files(fnames, fout, options):
     while not finished:  # cycle through files in batch
         N += 1
         if N % 50000 == 0:
-            sys.stderr.write(".")
+            logger.debug(".")
         buf = []
         for f in fopen:  # each opened file
             ln = f.readline().decode().split()  # read 1 line
@@ -898,12 +911,12 @@ def merge_files(fnames, fout, options):
         if len(buf) > 0:
             if buf[0] == "chrom":
                 if options.verbose:
-                    sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {len(buf)-1} files")
+                    logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} merging {len(buf)-1} files")
             fout.write(" ".join(buf) + "\n")  # combining sample counts into columns
         else:
             break
 
-    sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  done.\n")
+    logger.info(f" done.\n")
     for fin in fopen:
         fin.close()
 
@@ -945,7 +958,7 @@ def merge_junctions(options):
         lsts.append(ln.strip())
 
     if options.verbose:
-        sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} \nMerging {len(lsts)} junction files...\n")
+        logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} \nMerging {len(lsts)} junction files...\n")
 
     # Change 300 if max open file is < 300
     # set up batch N per batch
@@ -1020,7 +1033,7 @@ def get_numers(options):
     fout = gzip.open(fnameout, "wt")
     first_line = True
 
-    sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} \nExtracting numerators (read counts) from {fname}...")
+    logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} \nExtracting numerators (read counts) from {fname}...")
 
     for l in input_file:
         if first_line:
@@ -1037,8 +1050,7 @@ def get_numers(options):
 
     input_file.close()
     fout.close()
-    sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} done.\n")
-
+    logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} done.\n")
 
 def pick_sjc_label(df):
     '''Pick one label for each intron based on priroty'''
@@ -1056,88 +1068,61 @@ def merge_discordant_logics(sjc_file: str):
     classifier = {
         # each bit represents:
         # is_GTFAnnotatedCoding?  is_GTFAnnotated?  is_LF2AnnotatedCoding?  is_ClosetoUTR?
-        '0000': 'UP', # UnProductive,
-        '0001': 'NE', # NEither productive nor unproductive
-        '0010': 'PR', # PRoductive
-        '0011': 'PR', # PRoductive
-        '0100': 'UP', # UnProductive
-        '0101': 'NE', # Neither Productive nor UnProductive
-        '0110': 'PR', # PRoductive
-        '0111': 'PR', # PRodutive
-        '1000': 'PR', # PRoductive
-        '1001': 'PR', # PRoductive
-        '1010': 'PR', # PRoductive
-        '1011': 'PR', # PRoductive
-        '1100': 'PR', # PRoductive
-        '1101': 'PR', # PRoductive
-        '1110': 'PR', # PRoductive
-        '1111': 'PR'  # PRoductive
-        }
-
-    sjc = pd.read_csv(sjc_file, sep = "\t")
-    classifer_3bits = {
-        # each bit represents:
-        # is_GTFAnnotated?  is_LF2AnnotatedCoding?  is_ClosetoUTR?
-        '000': 'UP', # UnProductive,
-        '001': 'NE', # NEither productive nor unproductive
-        '010': 'PR', # PRoductive
-        '011': 'PR', # PRoductive
-        '100': 'UP', # UnProductive
-        '101': 'NE', # Neither Productive nor UnProductive
-        '110': 'PR', # PRoductive
-        '111': 'PR', # PRodutive
+        '0000': 'UP',
+        '0001': 'NE',
+        '0010': 'PR',
+        '0011': 'PR',
+        '0100': 'UP',
+        '0101': 'NE',
+        '0110': 'PR',
+        '0111': 'PR',
+        '1000': 'PR',
+        '1001': 'PR',
+        '1010': 'PR',
+        '1011': 'PR',
+        '1100': 'PR',
+        '1101': 'PR',
+        '1110': 'PR',
+        '1111': 'PR'
     }
 
+    sjc = pd.read_csv(sjc_file, sep="\t")
 
-    # group dt; NOTE:ForwardSpliceJunctionClassifier has an extra Strand column, backward doesn't
-    if 'Strand' in sjc.columns:
-        sjc = sjc[['Gene_name', 'Intron_coord', 'Strand', 'GencodePC', 'Annot', 'Coding', 'UTR']]
+    # Require ForwardSpliceJunctionClassifier format with Strand column
+    # If missing, raise a clear error instead of using outdated 3-bit logic.
+    if 'Strand' not in sjc.columns:
+        logger.error(f"Error: Expected 'Strand' column in {sjc_file}. Backward/legacy 3-bit classification is deprecated.")
+        raise SystemExit(f"Error: Expected 'Strand' column in {sjc_file}. "
+                         f"Backward/legacy 3-bit classification is deprecated.")
 
-        # convert Annotation, Coding, UTR status to SJ categories
-        sjc['SJClass'] = sjc[['GencodePC', 'Annot', 'Coding', 'UTR'
-                              ]].astype(int).astype(str).agg(''.join, axis=1).map(classifier)
+    sjc = sjc[['Gene_name', 'Intron_coord', 'Strand', 'GencodePC', 'Annot', 'Coding', 'UTR']]
 
-        # if multiple classifications, take the one with highest priority
-        sjc = sjc.groupby(['Intron_coord', 'Strand'])[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']].apply(pick_sjc_label).reset_index(drop=True)
-        sjc = sjc[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']]
+    # convert Annotation, Coding, UTR status to SJ categories (4-bit with GencodePC)
+    sjc['SJClass'] = sjc[['GencodePC', 'Annot', 'Coding', 'UTR']].astype(int).astype(str).agg(''.join, axis=1).map(classifier)
 
-        # convert df to dict
-        sjc = sjc.set_index(['Intron_coord', 'Strand']).to_dict(orient='index')
-    else:
-        sjc = sjc[['Gene_name', 'Intron_coord', 'Annot', 'Coding', 'UTR']]
-        
-        # convert Annotation, Coding, UTR status to SJ categories
-        sjc['SJClass'] = sjc[['Annot', 'Coding', 'UTR'
-                              ]].astype(int).astype(str).agg(''.join, axis=1).map(classifer_3bits)
-        
-        # if multiple classifications, take the one with highest priority
-        sjc = sjc.groupby(['Intron_coord', 'Strand'])[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']].apply(pick_sjc_label).reset_index(drop=True)
-        sjc = sjc[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']]
+    # if multiple classifications, take the one with highest priority
+    sjc = sjc.groupby(['Intron_coord', 'Strand'])[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']].apply(pick_sjc_label).reset_index(drop=True)
+    sjc = sjc[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']]
 
-        # convert df to dict
-        sjc = sjc.set_index('Intron_coord').to_dict(orient='index')
+    # convert df to dict keyed by (Intron_coord, Strand)
+    sjc = sjc.set_index(['Intron_coord', 'Strand']).to_dict(orient='index')
 
     sjc = {flatten_tuple(k): v for k, v in sjc.items()}
 
-    # sjc is a dcitionary with:
-    # - keys: intron coordinates, e.g. ('chr1', 1000, 2000, '+') or ('chr1', 1000, 2000) for backward
-    # - values: a dictionary e.g. {'SJClass': 'UP', 'Gene_name': 'DNMBP'}
+    # sjc is a dictionary with:
+    # - keys: intron coordinates, e.g. ('chr1', 1000, 2000, '+')
+    # - values: e.g. {'SJClass': 'UP', 'Gene_name': 'DNMBP'}
     return sjc
 
  
 def flatten_tuple(t):
-    # t: tuple like ('chr1:100-200', '+')' or str 'chr1:100-200'
-    if isinstance(t, tuple):
-        c, ab = t[0].split(":")
-    elif isinstance(t, str):
-        c, ab = t.split(":")
+    # t: tuple like ('chr1:100-200', '+')
+    # Simplified: we only handle tuple keys from set_index(['Intron_coord','Strand']).
+    c, ab = t[0].split(":")
     a, b = ab.split("-")
     a, b = int(a), int(b)
-    if isinstance(t, tuple):
-        s = t[1]
-        return((c, a, b, s)) # e.g. ('chr1', 100, 200, '+')
-    else:
-        return((c, a, b))
+    s = t[1]
+    return (c, a, b, s)
 
 def validate_gtf_requirements(gtf_file, options):
     """
@@ -1169,7 +1154,7 @@ def validate_gtf_requirements(gtf_file, options):
     found_attributes = set()
     protein_coding_found = False
     
-    sys.stderr.write(f"Validating GTF file: {gtf_file}\n")
+    logger.info(f"Validating GTF file: {gtf_file}\n")
     
     # Parse GTF file
     try:
@@ -1182,7 +1167,7 @@ def validate_gtf_requirements(gtf_file, options):
         for line in file_handle:
             line_count += 1
             if line_count % 100000 == 0:
-                sys.stderr.write(f"  Processed {line_count} lines...\n")
+                logger.info(f"  Processed {line_count} lines...\n")
                 
             # Skip comments and empty lines
             if line.startswith('#') or not line.strip():
@@ -1231,26 +1216,26 @@ def validate_gtf_requirements(gtf_file, options):
         file_handle.close()
         
     except Exception as e:
-        sys.stderr.write(f"Error reading GTF file {gtf_file}: {e}\n")
+        logger.error(f"Error reading GTF file {gtf_file}: {e}\n")
         exit(1)
     
-    sys.stderr.write(f"GTF validation complete. Processed {line_count} lines.\n")
+    logger.info(f"GTF validation complete. Processed {line_count} lines.\n")
     
     # Validate required features
     missing_required = required_features - found_features
     
     if missing_required:
-        sys.stderr.write("Error: Missing required feature types in GTF:\n")
-        sys.stderr.write(f"  Required but missing: {sorted(missing_required)}\n")
-        sys.stderr.write(f"  Found feature types: {sorted(found_features)}\n")
-        sys.stderr.write("  Required features: gene, exon, start_codon, stop_codon, CDS\n")
-        sys.stderr.write("  Note: UTR classification is determined from start/stop codons, not UTR features\n")
-        exit(1)
+        logger.error("Error: Missing required feature types in GTF:\n")
+        logger.error(f"  Required but missing: {sorted(missing_required)}\n")
+        logger.error(f"  Found feature types: {sorted(found_features)}\n")
+        logger.error("  Required features: gene, exon, start_codon, stop_codon, CDS\n")
+        logger.error("  Note: UTR classification is determined from start/stop codons, not UTR features\n")
+        raise SystemExit(1)  # changed from exit(1)
     
     # Check for protein_coding transcripts
     if not protein_coding_found:
-        sys.stderr.write("Warning: No 'protein_coding' transcript types found in GTF.\n")
-        sys.stderr.write("  This may affect junction classification.\n")
+        logger.warning("Warning: No 'protein_coding' transcript types found in GTF.\n")
+        logger.warning("  This may affect junction classification.\n")
     
     # Auto-detect and validate attributes
     user_specified = {}
@@ -1263,9 +1248,9 @@ def validate_gtf_requirements(gtf_file, options):
             # User specified - validate it exists
             user_specified[option_name] = current_value
             if current_value not in found_attributes:
-                sys.stderr.write(f"Error: User-specified attribute '{current_value}' for {option_name} not found in GTF\n")
-                sys.stderr.write(f"Available attributes: {sorted(found_attributes)}\n")
-                exit(1)
+                logger.error(f"Error: User-specified attribute '{current_value}' for {option_name} not found in GTF\n")
+                logger.error(f"Available attributes: {sorted(found_attributes)}\n")
+                raise SystemExit(1)  # changed from exit(1)
         else:
             # Auto-detect from alternatives
             detected = None
@@ -1278,26 +1263,85 @@ def validate_gtf_requirements(gtf_file, options):
                 auto_detected[option_name] = detected
                 setattr(options, option_name, detected)
             else:
-                sys.stderr.write(f"Error: No suitable attribute found for {option_name}\n")
-                sys.stderr.write(f"  Looked for: {alternatives}\n") 
-                sys.stderr.write(f"  Available attributes: {sorted(found_attributes)}\n")
-                sys.stderr.write(f"  Suggestion: Your GTF may use non-standard attribute names\n")
-                exit(1)
+                logger.error(f"Error: No suitable attribute found for {option_name}\n")
+                logger.error(f"  Looked for: {alternatives}\n") 
+                logger.error(f"  Available attributes: {sorted(found_attributes)}\n")
+                logger.error(f"  Suggestion: Your GTF may use non-standard attribute names\n")
+                raise SystemExit(1)  # changed from exit(1)
     
     # Print summary of what was used
     if user_specified:
-        sys.stderr.write("Using user-specified GTF attributes:\n")
+        logger.info("Using user-specified GTF attributes:\n")
         for option_name, value in user_specified.items():
-            sys.stderr.write(f"  {option_name}: {value}\n")
+            logger.info(f"  {option_name}: {value}\n")
             
     if auto_detected:
-        sys.stderr.write("Auto-detected GTF attributes:\n")
+        logger.info("Auto-detected GTF attributes:\n")
         for option_name, value in auto_detected.items():
-            sys.stderr.write(f"  {option_name}: {value} (auto-detected)\n")
+            logger.info(f"  {option_name}: {value} (auto-detected)\n")
     
-    sys.stderr.write("GTF validation and attribute detection complete.\n")
+    logger.info("GTF validation and attribute detection complete.\n")
     
     return options
+
+def has_cds_feature(gtf_file: str) -> bool:
+    """Detect if any CDS feature exists in the GTF (streaming)."""
+    try:
+        opener = gzip.open if gtf_file.endswith('.gz') else open
+        with opener(gtf_file, 'rt') as fh:
+            for line in fh:
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split('\t')
+                if len(parts) >= 3 and parts[2] == 'CDS':
+                    return True
+    except Exception as e:
+        logger.warning(f"Failed scanning GTF for CDS: {e}")
+    return False
+
+
+def validate_or_reformat_gtf(gtf_file, options):
+    """
+    Validate GTF; if validation fails and auto-reformat is enabled, attempt
+    to reformat with Reformat_gtf and re-validate. Updates options.annot.
+    """
+    try:
+        return validate_gtf_requirements(gtf_file, options)
+    except SystemExit:
+        if getattr(options, 'no_auto_reformat', False):
+            logger.error("GTF validation failed and auto-reformat is disabled.")
+            raise
+        if not options.genome:
+            logger.error("GTF validation failed and genome fasta is required to attempt auto-reformat.")
+            raise
+        base = os.path.basename(gtf_file)
+        base = base[:-3] if base.endswith('.gz') else base
+        base = base[:-4] if base.endswith('.gtf') else base
+        reformatted = os.path.join(options.rundir, f"reformatted_{base}.gtf")
+        cds_present = has_cds_feature(gtf_file)
+        trans_approach = 'B' if cds_present else 'D'
+        arg_str = (
+            f"-i {gtf_file} -fa {options.genome} "
+            f"-extra_attributes {options.gene_name},{options.transcript_name},{options.transcript_type} "
+            f"-transcript_id_attribute_name {options.transcript_name or 'transcript_id'} "
+            f"-gene_id_attribute_name {options.gene_name or 'gene_id'} "
+            f"-infer_gene_type_approach B -infer_transcript_type_approach C "
+            f"-translation_approach {trans_approach} -o {reformatted}"
+        )
+        logger.info(f"Attempting to reformat GTF (CDS={'yes' if cds_present else 'no'}) -> {reformatted}")
+        try:
+            logger.warning("Reformatting gtf is experimental; please check output GTF carefully.")
+            logger.warning("Running Transcript_tools to reformat gtf with arguments:\n" + arg_str)
+            # Call main with a list of args
+            Transcript_tools.main(shlex.split(arg_str))
+        except SystemExit as e:
+            logger.error(f"Transcript_tools exited with status {e.code}")
+            raise SystemExit(1)
+        except Exception as e:
+            logger.error(f"Transcript_tools failed: {e}")
+            raise SystemExit(1)
+        options.annot = reformatted
+        return validate_gtf_requirements(options.annot, options)
 
 def annotate_noisy(options):
     """Annotate introns
@@ -1329,20 +1373,20 @@ def annotate_noisy(options):
     fnameout = f"{rundir}/{outPrefix}"
     sjc_f = f"{rundir}/clustering/{outPrefix}_junction_classifications.txt"  # Classified junction annotations
 
-    sys.stderr.write(
+    logger.info(
         f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Annotating introns with custom-classified annotations: {sjc_f} ...\n"
     )
 
     if sjc_f != None:
 
         if options.verbose:
-            sys.stderr.write(
+            logger.info(
                 f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Loading {sjc_f} for (un/)productive splicing classification..\n"
             )
         sjc = merge_discordant_logics(sjc_f)
 
         if options.verbose:
-            sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Loaded.\n")
+            logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Loaded.\n")
 
         # Use the counts file source (either provided or generated)
         if options.counts_file:
@@ -1433,14 +1477,14 @@ def annotate_noisy(options):
         
         N_introns_annotated += 1
         if N_introns_annotated % 10000 == 0:
-            sys.stderr.write(f" ... {N_introns_annotated} introns annotated.\n")
+            logger.info(f" ... {N_introns_annotated} introns annotated.\n")
 
     foutdiag.close()
     foutdiagnumers.close()
 
-    sys.stderr.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Annotation done.\n")
-    sys.stderr.write(f"Annotated {N_introns_annotated} introns.\n")
-    sys.stderr.write(f"Filtered out {N_skipped_introns} introns with stdev(reads) < {minreadstd} or zero usage.\n")
+    logger.info(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Annotation done.\n")
+    logger.info(f"Annotated {N_introns_annotated} introns.\n")
+    logger.info(f"Filtered out {N_skipped_introns} introns with stdev(reads) < {minreadstd} or zero usage.\n")
 
 
 def main(options, libl):
@@ -1453,7 +1497,7 @@ def main(options, libl):
     if options.counts_file:
         # User provided pre-existing counts file
         perind_file = options.counts_file
-        sys.stderr.write(f"Using provided counts file: {perind_file}\n")
+        logger.info(f"Using provided counts file: {perind_file}\n")
     else:
         # Run full pipeline to generate counts
         if options.cluster == None:
@@ -1474,13 +1518,13 @@ def main(options, libl):
     if options.annot != None and options.genome != None:
 
         # Validate GTF and auto-detect attributes
-        options = validate_gtf_requirements(options.annot, options)
+        options = validate_or_reformat_gtf(options.annot, options)
 
-        sys.stdout.write(f"Loading genome {options.genome} ...")
+        logger.info(f"Loading genome {options.genome} ...")
         fa = pyfastx.Fasta(options.genome)
-        sys.stdout.write("done!\n")
+        logger.info("done!")
 
-        sys.stdout.write("Classifying splice junctions...\n")
+        logger.info("Classifying splice junctions...")
         sjcf.ClassifySpliceJunction(
             perind_file=perind_file,
             gtf_annot=options.annot,
@@ -1497,7 +1541,7 @@ def main(options, libl):
         annotate_noisy(options)
 
     else:
-        sys.stderr.write("Skipping annotation step...\n")
+        logger.info("Skipping annotation step...\n")
 
 
 if __name__ == "__main__":
@@ -1700,22 +1744,41 @@ if __name__ == "__main__":
         type=int,
         help="skip solveNMD function if gene contains more than N juncs. Juncs in skipped genes are assigned Coding=False. Default 10000")
 
+    parser.add_argument(
+        "--log-level",
+        dest="log_level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging level (default INFO)",
+    )
+
+    parser.add_argument(
+        "--no-auto-reformat-gtf",
+        dest="no_auto_reformat",
+        action="store_true",
+        default=False,
+        help="Disable automatic GTF reformatting when validation fails",
+    )
+
     options = parser.parse_args()
+
+    # Initialize logging once
+    setup_logging(options.log_level, options.verbose)
 
     # Validate input arguments
     if not options.counts_file and not options.juncfiles:
-        sys.stderr.write("Error: Either --juncfiles or --counts-file must be provided\n")
+        logger.error("Error: Either --juncfiles or --counts-file must be provided\n")
         exit(1)
     
     if options.counts_file:
         if not os.path.exists(options.counts_file):
-            sys.stderr.write(f"Error: Counts file {options.counts_file} does not exist\n")
+            logger.error(f"Error: Counts file {options.counts_file} does not exist\n")
             exit(1)
         if not (options.annot and options.genome):
-            sys.stderr.write("Error: When using --counts-file, both --annot and --genome are required for classification\n")
+            logger.error("Error: When using --counts-file, both --annot and --genome are required for classification\n")
             exit(1)
     elif options.juncfiles == None:
-        sys.stderr.write("Error: no junction file provided...\n")
+        logger.error("Error: no junction file provided...\n")
         exit(0)
 
     # Get the junction file list with optional sample names
@@ -1732,7 +1795,7 @@ if __name__ == "__main__":
             try:
                 open(filepath)
             except:
-                sys.stderr.write(f"Error on line {line_num}: {filepath} does not exist... check your junction files.\n")
+                logger.error(f"Error on line {line_num}: {filepath} does not exist... check your junction files.\n")
                 exit(0)
             
             libl.append(line)  # Keep the full line (with optional sample name)
@@ -1747,7 +1810,7 @@ if __name__ == "__main__":
     main(options, libl)
 
     if not options.keeptemp:
-        sys.stderr.write("Remove generated temp files... \n")
+        logger.info("Remove generated temp files... \n")
         
         sortedlibs_file = os.path.join(options.rundir, options.outprefix) + "_sortedlibs"
         
@@ -1760,19 +1823,19 @@ if __name__ == "__main__":
                             try:
                                 os.remove(tmp)
                                 if options.verbose:
-                                    sys.stderr.write(f"Removed {tmp}\n")
+                                    logger.info(f"Removed {tmp}")
                             except Exception as e:
-                                sys.stderr.write(f"Warning: Could not remove {tmp}: {e}\n")
+                                logger.warning(f"Warning: Could not remove {tmp}: {e}\n")
                         else:
                             if options.verbose:
-                                sys.stderr.write(f"File {tmp} already removed or doesn't exist\n")
+                                logger.info(f"File {tmp} already removed or doesn't exist\n")
                 
                 # Remove the sortedlibs file itself
                 os.remove(sortedlibs_file)
             except Exception as e:
-                sys.stderr.write(f"Warning: Could not process {sortedlibs_file}: {e}\n")
+                logger.warning(f"Warning: Could not process {sortedlibs_file}: {e}\n")
         else:
-            sys.stderr.write(f"Warning: {sortedlibs_file} not found\n")
+            logger.warning(f"{sortedlibs_file} not found\n")
         
         # Clean up clustering files if they exist
         if options.cluster == None:
@@ -1784,11 +1847,11 @@ if __name__ == "__main__":
                     try:
                         os.remove(cleanup_file)
                         if options.verbose:
-                            sys.stderr.write(f"Removed {cleanup_file}\n")
+                            logger.info(f"Removed {cleanup_file}")
                     except Exception as e:
-                        sys.stderr.write(f"Warning: Could not remove {cleanup_file}: {e}\n")
+                        logger.warning(f"Warning: Could not remove {cleanup_file}: {e}\n")
         
-        sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
+        logger.info(f"Done.\n")
         
     if (options.annot == None) or (options.genome == None):
         if not options.const:
@@ -1804,7 +1867,7 @@ if __name__ == "__main__":
     else:
         
         if not options.keepleafcutter1:
-            sys.stderr.write("Remove generated LeafCutter1 files... \n")
+            logger.info("Remove generated LeafCutter1 files... \n")
             
             # Only remove files if they were generated (not using provided counts file)
             if not options.counts_file:
@@ -1814,17 +1877,17 @@ if __name__ == "__main__":
                 if os.path.exists(perind_file):
                     os.remove(perind_file)
                     if options.verbose:
-                        sys.stderr.write(f"Removed {perind_file}\n")
+                        logger.info(f"Removed {perind_file}")
                 
                 if os.path.exists(numers_file):
                     os.remove(numers_file)
                     if options.verbose:
-                        sys.stderr.write(f"Removed {numers_file}\n")
+                        logger.info(f"Removed {numers_file}")
             else:
                 if options.verbose:
-                    sys.stderr.write("Skipping LeafCutter1 file removal - used provided counts file\n")
+                    logger.info("Skipping LeafCutter1 file removal - used provided counts file\n")
                     
-            sys.stderr.write(f"\n{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} Done.\n")
+            logger.info(f"Done.\n")
         else:
             # Only move files if they were generated (not using provided counts file)
             if not options.counts_file:
@@ -1842,6 +1905,6 @@ if __name__ == "__main__":
                                 os.path.join(options.rundir, "leafcutter1_files", options.outprefix) + "_perind_numers.counts.gz")
             else:
                 if options.verbose:
-                    sys.stderr.write("Skipping LeafCutter1 file preservation - used provided counts file\n")
+                    logger.info("Skipping LeafCutter1 file preservation - used provided counts file\n")
 
 # python ../scripts/leafcutter2.py -r example/outtut_dir -A annotation/chr10.gtf.gz -r output_dir -G annotation/chr10.fa.gz -j junction_files.txt -L -gn gene_id tn transcript_id
