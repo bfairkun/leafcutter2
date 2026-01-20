@@ -19,7 +19,7 @@ import ForwardSpliceJunctionClassifier as sjcf
 import pandas as pd
 import pyfastx
 import logging
-import add_on_scripts.Reformat_gtf
+import Transcript_tools
 import shlex
 
 logger = logging.getLogger(__name__)
