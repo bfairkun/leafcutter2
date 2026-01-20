@@ -1124,13 +1124,17 @@ def flatten_tuple(t):
     s = t[1]
     return (c, a, b, s)
 
-def validate_gtf_requirements(gtf_file, options):
+def validate_gtf_requirements(gtf_file, options, CheckRequirementsEveryNLines=None):
     """
     Validate GTF file and auto-detect attribute names if not specified by user.
+    Optionally perform periodic checks (every N lines) to exit early when all
+    required features/attributes are found.
     
     Args:
         gtf_file: Path to GTF file
         options: argparse options object
+        CheckRequirementsEveryNLines: int or None. If int, check every N lines
+            for completion and break early when satisfied. If None, parse full file.
     
     Returns:
         options: Modified options object with auto-detected attributes
@@ -1147,7 +1151,7 @@ def validate_gtf_requirements(gtf_file, options):
     }
     
     # Required feature types
-    required_features = {'transcript','exon', 'start_codon', 'stop_codon', 'CDS'}
+    required_features = {'transcript','gene','exon', 'start_codon', 'stop_codon', 'CDS'}
     
     # Track what we find
     found_features = set()
@@ -1155,6 +1159,13 @@ def validate_gtf_requirements(gtf_file, options):
     protein_coding_found = False
     
     logger.info(f"Validating GTF file: {gtf_file}\n")
+    
+    # Helper: are all attribute alternatives present?
+    def _attributes_satisfied():
+        for _, alts in attribute_alternatives.items():
+            if not any(a in found_attributes for a in alts):
+                return False
+        return True
     
     # Parse GTF file
     try:
@@ -1212,7 +1223,12 @@ def validate_gtf_requirements(gtf_file, options):
             for attr_name in ['transcript_type', 'transcript_biotype']:
                 if attr_name in attributes and attributes[attr_name] == 'protein_coding':
                     protein_coding_found = True
-                    
+            
+            # Optional periodic early check
+            if CheckRequirementsEveryNLines and (line_count % int(CheckRequirementsEveryNLines) == 0):
+                if required_features.issubset(found_features) and _attributes_satisfied():
+                    logger.info(f"  Early stop at {line_count} lines: requirements satisfied.\n")
+                    break
         file_handle.close()
         
     except Exception as e:
@@ -1230,7 +1246,7 @@ def validate_gtf_requirements(gtf_file, options):
         logger.error(f"  Found feature types: {sorted(found_features)}\n")
         logger.error("  Required features: gene, exon, start_codon, stop_codon, CDS\n")
         logger.error("  Note: UTR classification is determined from start/stop codons, not UTR features\n")
-        raise SystemExit(1)  # changed from exit(1)
+        raise SystemExit(1)
     
     # Check for protein_coding transcripts
     if not protein_coding_found:
@@ -1250,7 +1266,7 @@ def validate_gtf_requirements(gtf_file, options):
             if current_value not in found_attributes:
                 logger.error(f"Error: User-specified attribute '{current_value}' for {option_name} not found in GTF\n")
                 logger.error(f"Available attributes: {sorted(found_attributes)}\n")
-                raise SystemExit(1)  # changed from exit(1)
+                raise SystemExit(1)
         else:
             # Auto-detect from alternatives
             detected = None
@@ -1267,7 +1283,7 @@ def validate_gtf_requirements(gtf_file, options):
                 logger.error(f"  Looked for: {alternatives}\n") 
                 logger.error(f"  Available attributes: {sorted(found_attributes)}\n")
                 logger.error(f"  Suggestion: Your GTF may use non-standard attribute names\n")
-                raise SystemExit(1)  # changed from exit(1)
+                raise SystemExit(1)
     
     # Print summary of what was used
     if user_specified:
@@ -1306,7 +1322,7 @@ def validate_or_reformat_gtf(gtf_file, options):
     to reformat with Reformat_gtf and re-validate. Updates options.annot.
     """
     try:
-        return validate_gtf_requirements(gtf_file, options)
+        return validate_gtf_requirements(gtf_file, options, CheckRequirementsEveryNLines=1000)
     except SystemExit:
         if getattr(options, 'no_auto_reformat', False):
             logger.error("GTF validation failed and auto-reformat is disabled.")
@@ -1341,7 +1357,7 @@ def validate_or_reformat_gtf(gtf_file, options):
             logger.error(f"Transcript_tools failed: {e}")
             raise SystemExit(1)
         options.annot = reformatted
-        return validate_gtf_requirements(options.annot, options)
+        return validate_gtf_requirements(options.annot, options, CheckRequirementsEveryNLines=1000)
 
 def annotate_noisy(options):
     """Annotate introns
