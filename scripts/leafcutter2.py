@@ -1147,7 +1147,7 @@ def validate_gtf_requirements(gtf_file, options):
     }
     
     # Required feature types
-    required_features = {'gene', 'exon', 'start_codon', 'stop_codon', 'CDS'}
+    required_features = {'transcript','exon', 'start_codon', 'stop_codon', 'CDS'}
     
     # Track what we find
     found_features = set()
