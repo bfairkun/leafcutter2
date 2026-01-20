@@ -1224,6 +1224,27 @@ def main(args=None):
             start_codon_kozak = score_kozak_window(sequence, pssm=pssm)
             transcript_attributes += f' tag "start_codon_kozak_log_odds":"{start_codon_kozak}";'
 
+            # After transcript_out is finalized, track per-gene coordinate span for GTF gene features
+            if args.gtf_out and gene_coords_dict is not None:
+                chrom = transcript_out.chr
+                strand = transcript_out.strand
+                # initialize nested sets
+                _ = gene_coords_dict[gene_id][chrom][strand]['start']
+                _ = gene_coords_dict[gene_id][chrom][strand]['end']
+                gene_coords_dict[gene_id][chrom][strand]['start'].add(transcript_out.start)
+                gene_coords_dict[gene_id][chrom][strand]['end'].add(transcript_out.end)
+
+            # Track gene types and transcript types seen (for later gene_type inference)
+            gtinfo = gene_types_dict[gene_id]
+            if 'gene_types_in_input' not in gtinfo:
+                gtinfo['gene_types_in_input'] = set()
+            if 'trancscript_types' not in gtinfo:
+                gtinfo['trancscript_types'] = set()
+            if gene_type:
+                gtinfo['gene_types_in_input'].add(gene_type)
+            if transcript_type:
+                gtinfo['trancscript_types'].add(transcript_type)
+
             # Write to GTF only if GTF output is enabled
             if args.gtf_out:
                 _ = gtf_stringio.write(gtf_formatted_bedline_tx(transcript_out, source=source, attributes_str=transcript_attributes))
