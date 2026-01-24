@@ -90,12 +90,7 @@ Finally, some GTFs might lack some or all of these features and information. E.g
 ```
 python scripts/leafcutter2.py -h
 
-usage: leafcutter2.py [-h] -j JUNCFILES 
-                              [-o OUTPREFIX] [-q] [-r RUNDIR]
-                              [-l MAXINTRONLEN] [-m MINCLUREADS]
-                              [-M MINREADS] [-p MINCLURATIO]
-                              [-c CLUSTER] [-k] [-C]
-                              [-N NOISECLASS] [-f OFFSET] [-T]
+usage: leafcutter2.py [-h] -j JUNCFILES [OPTIONAL ARGUMENTS]
 
 required arguments:
   -j JUNCFILES, --juncfiles JUNCFILES
