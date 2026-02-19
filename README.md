@@ -2,7 +2,9 @@
 
 ## Introduction
 
-LeafCutter2 is a tool for clustering, functional characterization and quantification of splice junction read counts. It implements a novel dynamic programming algorithm over the standard LeafCutter output to classify splice junctions and alternative splicing events according to their molecular function (i.e.: protein-coding or unproductive).
+LeafCutter2 is a tool for clustering, functional characterization, and quantification of splice junction read counts. It implements a novel dynamic programming algorithm over the standard LeafCutter output to classify splice junctions and alternative splicing events according to their molecular function (i.e.: protein-coding or unproductive).
+
+[LeafCutter2 also provides a Python implementation of our original differential analysis algorithm](https://github.com/leafcutter2/leafcutter-ds). This is faster and easier to install than the R version, and it is fully compatible with our new clustering and functional classification tools.
 
 #### Prerequisites
 
