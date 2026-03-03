@@ -5,6 +5,15 @@ __author__ = "Yang Li, Chao Dai, Quinn Hauck, Carlos Buen Abad Najar"
 __status__ = "Development"
 __version__ = "v2.0.1"
 
+# TODO: refactor chromLst out of module-level scope — pass as argument to
+# pool_junc_reads(), addlowusage(), and sort_junctions() instead of relying on module global.
+chromLst = (
+    [f"chr{x}" for x in range(1, 23)]
+    + ["chrX", "chrY"]
+    + [f"{x}" for x in range(1, 23)]
+    + ["X", "Y"]
+)
+
 import argparse
 import gzip
 import os
@@ -15,11 +24,11 @@ import tempfile
 from statistics import stdev
 from datetime import datetime
 
-import ForwardSpliceJunctionClassifier as sjcf
+from leafcutter2 import classifier as sjcf
 import pandas as pd
 import pyfastx
 import logging
-import Transcript_tools
+from leafcutter2 import transcript_tools as Transcript_tools
 import shlex
 
 logger = logging.getLogger(__name__)
@@ -133,7 +142,6 @@ def pool_junc_reads(flist, options):
             e.g. chr17:+ 410646:413144:3 410646:413147:62
     """
 
-    global chromLst
 
     outPrefix = options.outprefix
     rundir = options.rundir
@@ -489,7 +497,6 @@ def addlowusage(options):
 
     """
 
-    global chromLst
 
     logger.info(f"Add low usage introns...\n")
 
@@ -661,7 +668,6 @@ def sort_junctions(libl, options):
             a series of sorted input junction files, sorted.
     """
 
-    global chromLst
 
     outPrefix = options.outprefix
     rundir = options.rundir
@@ -1560,7 +1566,8 @@ def main(options, libl):
         logger.info("Skipping annotation step...\n")
 
 
-if __name__ == "__main__":
+
+def main_cli():
 
     parser = argparse.ArgumentParser()
     
@@ -1816,13 +1823,6 @@ if __name__ == "__main__":
             
             libl.append(line)  # Keep the full line (with optional sample name)
 
-    chromLst = (
-        [f"chr{x}" for x in range(1, 23)]
-        + ["chrX", "chrY"]
-        + [f"{x}" for x in range(1, 23)]
-        + ["X", "Y"]
-    )
-
     main(options, libl)
 
     if not options.keeptemp:
@@ -1924,3 +1924,7 @@ if __name__ == "__main__":
                     logger.info("Skipping LeafCutter1 file preservation - used provided counts file\n")
 
 # python ../scripts/leafcutter2.py -r example/outtut_dir -A annotation/chr10.gtf.gz -r output_dir -G annotation/chr10.fa.gz -j junction_files.txt -L -gn gene_id tn transcript_id
+
+
+if __name__ == "__main__":
+    main_cli()

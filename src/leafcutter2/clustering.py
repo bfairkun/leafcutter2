@@ -54,6 +54,15 @@ __email__     = "chaodai@uchicago.edu"
 __status__    = "Development"
 __version__   =  "v0.0.1"
 
+# TODO: refactor chromLst out of module-level scope — pass as argument to
+# pool_junc_reads() and addlowusage() instead of relying on module global.
+chromLst = (
+    [f"chr{x}" for x in range(1, 23)]
+    + ["chrX", "chrY"]
+    + [f"{x}" for x in range(1, 23)]
+    + ["X", "Y"]
+)
+
 
 def natural_sort(l): 
     '''Natural sort a list of string/tuple, similar to bash `sort -V`
@@ -156,7 +165,6 @@ def pool_junc_reads(flist, options):
             e.g. chr17:+ 410646:413144:3 410646:413147:62
     '''
 
-    global chromLst
 
     outPrefix = options.outprefix
     rundir = options.rundir
@@ -491,7 +499,6 @@ def addlowusage(options):
               
     '''
 
-    global chromLst
 
     sys.stderr.write("\nAdd low usage introns...\n")
 
@@ -608,7 +615,8 @@ def main(options, libl):
     addlowusage(options)
 
 
-if __name__ == "__main__":
+
+def main_cli():
 
     import argparse
 
@@ -675,7 +683,8 @@ if __name__ == "__main__":
             exit(0)
         libl.append(junc)
 
-    chromLst = [f"chr{x}" for x in range(1,23)]+['chrX','chrY'] + \
-        [f"{x}" for x in range(1,23)]+['X','Y']
-
     main(options, libl)
+
+
+if __name__ == "__main__":
+    main_cli()

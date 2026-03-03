@@ -1,16 +1,25 @@
-.snakemake/*
-./snakemake
-.vscode
-Untitled*.ipynb
-.ipynb_checkpoints
-/.quarto/
-.Rproj.user
-.Rhistory
-test/*
-test
-test*
-play*/
-**/*checkpoints/*
-**/*cache*/
+# Ignore everything by default
+*
 
+# Un-ignore tracked content
+!.gitignore
+!README.md
+!LICENSE
+!pyproject.toml
+!leafcutter2_env.yml
 
+# Source package
+!src/
+!src/**
+
+# Tests
+!tests/
+!tests/**
+
+# Example data
+!example/
+!example/**
+
+# GitHub Actions CI
+!.github/
+!.github/**
