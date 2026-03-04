@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 
 
-__author__ = "Yang Li, Chao Dai, Quinn Hauck, Carlos Buen Abad Najar"
-__status__ = "Development"
-__version__ = "v2.0.1"
-
 # TODO: refactor chromLst out of module-level scope — pass as argument to
 # pool_junc_reads(), addlowusage(), and sort_junctions() instead of relying on module global.
 chromLst = (

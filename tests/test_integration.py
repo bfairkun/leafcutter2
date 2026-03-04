@@ -111,7 +111,7 @@ def test_package_imports():
 
 def test_entry_points_help():
     """All registered entry-point commands respond to --help."""
-    for cmd in ["leafcutter2", "leafcutter2-make-clusters", "leafcutter2-star2junc"]:
+    for cmd in ["leafcutter2", "leafcutter2-make-clusters", "leafcutter2-star2junc", "leafcutter2-transcript-tools"]:
         result = subprocess.run(
             [cmd, "--help"],
             capture_output=True,

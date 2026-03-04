@@ -14,9 +14,8 @@ By default, no read filters are applied.
 Junction files are processed using regtools:
 
     * https://github.com/griffithlab/regtools
-    * /home/yangili1/tools/regtools/build/regtools junctions extract -a 8 -i \
-      50 -I 500000 bamfile.bam -o outfile.junc
-    * Using regtools speeds up the junction extraction step by an order of 
+    * regtools junctions extract -a 8 -i 50 -I 500000 bamfile.bam -o outfile.junc
+    * Using regtools speeds up the junction extraction step by an order of
       magnitude or more
 
 Procedure sequence: 
@@ -47,12 +46,7 @@ import tempfile
 import os
 import gzip
 import shutil
-
-
-__author__    = "Yang Li, Chao Dai"
-__email__     = "chaodai@uchicago.edu"
-__status__    = "Development"
-__version__   =  "v0.0.1"
+import logging
 
 # TODO: refactor chromLst out of module-level scope — pass as argument to
 # pool_junc_reads() and addlowusage() instead of relying on module global.
@@ -170,7 +164,7 @@ def pool_junc_reads(flist, options):
     rundir = options.rundir
     maxIntronLen = int(options.maxintronlen)
     checkchrom = options.checkchrom
-    print(f"Max Intron Length: {maxIntronLen}")
+    logging.info(f"Max Intron Length: {maxIntronLen}")
     outFile = f"{rundir}/clustering/{outPrefix}_pooled"
     
     if not os.path.exists(f"{rundir}/clustering/"):
@@ -205,7 +199,7 @@ def pool_junc_reads(flist, options):
             if len(lnsplit) == 12: # 12 fields regtools junc file
                 chrom, A, B, dot, counts, strand, rA,rb, rgb, blockCount, blockSize, blockStarts = lnsplit
                 if int(blockCount) > 2:  
-                    print(ln, "ignored...")
+                    logging.debug(f"{ln.strip()} ignored...")
                     continue
                 Aoff, Boff = blockSize.split(",")[:2]
                 A, B = int(A)+int(Aoff), int(B)-int(Boff) # get intron

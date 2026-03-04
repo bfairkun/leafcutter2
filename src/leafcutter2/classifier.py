@@ -706,7 +706,7 @@ def parse_gtf(gtf: str,
         for standard_key, custom_attr in attribute_mapping.items():
             try: 
                 dic[standard_key] = info_fields[custom_attr]
-            except:
+            except KeyError:
                 dic[standard_key] = None
         yield dic
          
