@@ -1,5 +1,0 @@
-[console_scripts]
-leafcutter2 = leafcutter2.cli:leafcutter2_cli
-leafcutter2-make-clusters = leafcutter2.cli:make_clusters_cli
-leafcutter2-star2junc = leafcutter2.cli:star2junc_cli
-leafcutter2-transcript-tools = leafcutter2.cli:transcript_tools_cli
