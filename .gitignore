@@ -1,16 +1,36 @@
-.snakemake/*
-./snakemake
-.vscode
-Untitled*.ipynb
-.ipynb_checkpoints
-/.quarto/
-.Rproj.user
-.Rhistory
-test/*
-test
-test*
-play*/
-**/*checkpoints/*
-**/*cache*/
+# Ignore everything by default
+*
 
+# Top-level config files
+!.gitignore
+!README.md
+!LICENSE
+!pyproject.toml
+!leafcutter2_env.yml
 
+# Source package — Python files only (avoids un-ignoring __pycache__, .egg-info, etc.)
+!src/
+!src/leafcutter2/
+!src/leafcutter2/*.py
+
+# Tests
+!tests/
+!tests/*.py
+!tests/reference_outputs/
+!tests/reference_outputs/*/
+!tests/reference_outputs/*/*
+!tests/reference_outputs/*/leafcutter1_files/
+!tests/reference_outputs/*/leafcutter1_files/*
+
+# Example data
+!example/
+!example/*.txt
+!example/data/
+!example/data/**
+!example/annotation/
+!example/annotation/**
+
+# GitHub Actions CI
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml

@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leafcutter2"
+version = "2.0.1"
+authors = [
+  { name = "Yang Li" },
+  { name = "Chao Dai" },
+  { name = "Quinn Hauck" },
+  { name = "Carlos Buen Abad Najar" },
+]
+description = "Splicing quantification and classification from RNA-seq junction files"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+  "numpy",
+  "pandas",
+  "biopython",
+  "pyfastx",
+  "bedparse",
+  "argparse-dataclass",
+]
+
+[project.scripts]
+leafcutter2 = "leafcutter2.cli:leafcutter2_cli"
+leafcutter2-make-clusters = "leafcutter2.cli:make_clusters_cli"
+leafcutter2-transcript-tools = "leafcutter2.cli:transcript_tools_cli"
+leafcutter2-star2junc = "leafcutter2.cli:star2junc_cli"
+
+[project.urls]
+Homepage = "https://github.com/leafcutter2/leafcutter2"
+"Bug Tracker" = "https://github.com/leafcutter2/leafcutter2/issues"
+
+[tool.setuptools]
+packages = ["leafcutter2"]
+package-dir = {"" = "src"}
+
+[dependency-groups]
+test = [
+  "pytest>=9",
+]
+dev = [
+  { include-group = "test" },
+]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+addopts = ["-ra", "--showlocals"]
+testpaths = ["tests"]

@@ -1,16 +1,4 @@
-#! /usr/bin/env python
-# -*- coding: utf-8 -*-
-# vim:fenc=utf-8
-#
-#
-#
-######################################################################
-# @author      : bjf79 (bjf79@midway2-login1.rcc.local)
-# @file        : bedparse_translate_transcripts
-# @created     : Friday Jun 21, 2024 12:26:19 CDT
-#
-# @description : 
-######################################################################
+#!/usr/bin/env python
 
 import sys
 import bedparse
@@ -128,7 +116,7 @@ def run_bedparse_gtf2bed(gtf_file, *args, n=None):
             pass
 
     if result.returncode != 0:
-        print(f"Error running bedparse gtf2bed: {result.stderr}")
+        logging.error(f"Error running bedparse gtf2bed: {result.stderr}")
         return None
     return result.stdout
 
@@ -1224,6 +1212,27 @@ def main(args=None):
             start_codon_kozak = score_kozak_window(sequence, pssm=pssm)
             transcript_attributes += f' tag "start_codon_kozak_log_odds":"{start_codon_kozak}";'
 
+            # After transcript_out is finalized, track per-gene coordinate span for GTF gene features
+            if args.gtf_out and gene_coords_dict is not None:
+                chrom = transcript_out.chr
+                strand = transcript_out.strand
+                # initialize nested sets
+                _ = gene_coords_dict[gene_id][chrom][strand]['start']
+                _ = gene_coords_dict[gene_id][chrom][strand]['end']
+                gene_coords_dict[gene_id][chrom][strand]['start'].add(transcript_out.start)
+                gene_coords_dict[gene_id][chrom][strand]['end'].add(transcript_out.end)
+
+            # Track gene types and transcript types seen (for later gene_type inference)
+            gtinfo = gene_types_dict[gene_id]
+            if 'gene_types_in_input' not in gtinfo:
+                gtinfo['gene_types_in_input'] = set()
+            if 'trancscript_types' not in gtinfo:
+                gtinfo['trancscript_types'] = set()
+            if gene_type:
+                gtinfo['gene_types_in_input'].add(gene_type)
+            if transcript_type:
+                gtinfo['trancscript_types'].add(transcript_type)
+
             # Write to GTF only if GTF output is enabled
             if args.gtf_out:
                 _ = gtf_stringio.write(gtf_formatted_bedline_tx(transcript_out, source=source, attributes_str=transcript_attributes))
@@ -1310,13 +1319,4 @@ def main(args=None):
         logging.info('GTF output disabled - skipping GTF processing and sorting')
 
 if __name__ == "__main__":
-    if hasattr(sys, 'ps1'):
-        # main("-i /project2/yangili1/bjf79/ReferenceGenomes/Mouse_UCSC.mm39_GencodeComprehensive46/Reference.gtf -o scratch/Mouse_UCSC.mm39_GencodeComprehensive46.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Mouse_UCSC.mm39_GencodeComprehensive46/Reference.GencodePrimary.fa -v -infer_gene_type_approach A -infer_transcript_type_approach A -transcript_name_attribute_name transcript_id -gene_name_attribute_name gene_id -n 10000 -bed12_out scratch/Mouse_UCSC.10K.bed".split(' '))
-        # main("-i scratch/Mouse_UCSC.10K.bed -input_type bed12 -o scratch/Mouse_UCSC.mm39_GencodeComprehensive46.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Mouse_UCSC.mm39_GencodeComprehensive46/Reference.GencodePrimary.fa -v -infer_gene_type_approach A -infer_transcript_type_approach A -transcript_name_attribute_name transcript_id -gene_name_attribute_name gene_id -n 10000 -bed12_out scratch/Mouse_UCSC.10K.Redone.bed".split(' '))
-        # main("-i Maz -input_type bed12 -o scratch/Mouse_UCSC.mm39_GencodeComprehensive46.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Mouse_UCSC.mm39_GencodeComprehensive46/Reference.GencodePrimary.fa -v -infer_gene_type_approach A -infer_transcript_type_approach A -transcript_name_attribute_name transcript_id -gene_name_attribute_name gene_id -n 10000 -bed12_out scratch/Mouse_UCSC.10K.Redone.bed".split(' '))
-        # main("-i scratch/TRNAA.gtf -o scratch/TRNAA_reformated.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Human_UCSC.hg38_GencodeComprehensive46/Reference.fa -v -infer_gene_type_approach B -infer_transcript_type_approach B -transcript_name_attribute_name transcript_id -gene_name_attribute_name gene_id".split(' '))
-        # main("-i /project2/yangili1/bjf79/ReferenceGenomes/GRCh38_GencodeRelease44Comprehensive/Reference.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Human_UCSC.hg38_GencodeComprehensive46/Reference.fa -bed12_out ../../../scratch/test.bed -n 1000000 -v -transcript_name_attribute_name transcript_id -gene_name_attribute_name gene_name -infer_gene_type_approach B".split(' '))
-        # main("-i scratch/COMMD5.gtf -fa /project2/yangili1/bjf79/ReferenceGenomes/Human_UCSC.hg38_GencodeComprehensive46/Reference.fa -o scratch/test.gtf -bed12_out scratch/test.bed -n 10000 -v -transcript_name_attribute_name transcript_name -gene_name_attribute_name gene_id".split(' '))
-        main("-i scratch/PRNP.bed -input_type bed12 -bed12_column_indexes 4 4 4 4 -fa /project2/yangili1/bjf79/ReferenceGenomes/GRCh38_GencodeRelease44Comprehensive/Reference.fa -bed12_out scratch/PRNP.translated.bed -v -infer_gene_type_approach B -infer_transcript_type_approach C --include_uorf_analysis -translation_approach D".split(' '))
-    else:
-        main()
+    main()
