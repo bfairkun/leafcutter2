@@ -8,6 +8,7 @@
 
 import argparse
 import gzip
+import hashlib
 import pickle
 import sys
 import logging
@@ -705,7 +706,7 @@ def parse_gtf(gtf: str,
         for standard_key, custom_attr in attribute_mapping.items():
             try: 
                 dic[standard_key] = info_fields[custom_attr]
-            except:
+            except KeyError:
                 dic[standard_key] = None
         yield dic
          
@@ -912,13 +913,17 @@ def ClassifySpliceJunction(
         for chrstrand in dic_junc:
             logger.debug(f"{len(dic_junc[chrstrand])} jxns on {chrstrand[0]} ({chrstrand[1]}).")
 
-    
+
+    # Compute content hash for stable pickle cache key (avoids basename collisions)
+    with open(gtf_annot, 'rb') as _f:
+        _gtf_hash = hashlib.md5(_f.read()).hexdigest()[:12]
+
     # load or parse gtf annotations
     # g_coords: gene coordinates, grouped by chromosome and strand
     # g_info: a dictionary with (transcript_name, gene_name) as keys, and intron info as values
-    try: 
+    try:
         logger.info("Loading annotations...")
-        parsed_gtf = f"{rundir}/{gtf_annot.split('/')[-1].split('.gtf')[0]}_SJC_annotations.pckle"
+        parsed_gtf = f"{rundir}/genesDict_{_gtf_hash}_SJC_annotations.pckle"
         with open(parsed_gtf, 'rb') as f:
             g_coords, g_info = pickle.load(f)
         logger.info("Loaded annotations.")
@@ -946,7 +951,7 @@ def ClassifySpliceJunction(
                 pickle.dump((g_coords, g_info), f)
 
 
-    txn2gene = f"{rundir}/txn2gene.{gtf_annot.split('/')[-1].split('.gtf')[0]}_SJC_annotations.pckle"
+    txn2gene = f"{rundir}/txn2gene_{_gtf_hash}_SJC_annotations.pckle"
     try:
         logger.info("Loading txn2gene annotations...")
         with open(txn2gene, 'rb') as f:
@@ -959,7 +964,7 @@ def ClassifySpliceJunction(
                 pickle.dump(transcripts_by_gene, f)
     logger.info("Loaded txn2gene annotations.")
 
-    nmd_tx2gene = f"{rundir}/nmd_txn2gene.{gtf_annot.split('/')[-1].split('.gtf')[0]}_SJC_annotations.pckle"
+    nmd_tx2gene = f"{rundir}/nmd_txn2gene_{_gtf_hash}_SJC_annotations.pckle"
     try:
         logger.info("Loading nmd_txn2gene annotations...")
         with open(nmd_tx2gene, 'rb') as f:

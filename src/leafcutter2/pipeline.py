@@ -1,9 +1,14 @@
 #!/usr/bin/env python
 
 
-__author__ = "Yang Li, Chao Dai, Quinn Hauck, Carlos Buen Abad Najar"
-__status__ = "Development"
-__version__ = "v2.0.1"
+# TODO: refactor chromLst out of module-level scope — pass as argument to
+# pool_junc_reads(), addlowusage(), and sort_junctions() instead of relying on module global.
+chromLst = (
+    [f"chr{x}" for x in range(1, 23)]
+    + ["chrX", "chrY"]
+    + [f"{x}" for x in range(1, 23)]
+    + ["X", "Y"]
+)
 
 import argparse
 import gzip
@@ -15,11 +20,11 @@ import tempfile
 from statistics import stdev
 from datetime import datetime
 
-import ForwardSpliceJunctionClassifier as sjcf
+from leafcutter2 import classifier as sjcf
 import pandas as pd
 import pyfastx
 import logging
-import add_on_scripts.Reformat_gtf
+from leafcutter2 import transcript_tools as Transcript_tools
 import shlex
 
 logger = logging.getLogger(__name__)
@@ -133,7 +138,6 @@ def pool_junc_reads(flist, options):
             e.g. chr17:+ 410646:413144:3 410646:413147:62
     """
 
-    global chromLst
 
     outPrefix = options.outprefix
     rundir = options.rundir
@@ -489,7 +493,6 @@ def addlowusage(options):
 
     """
 
-    global chromLst
 
     logger.info(f"Add low usage introns...\n")
 
@@ -661,7 +664,6 @@ def sort_junctions(libl, options):
             a series of sorted input junction files, sorted.
     """
 
-    global chromLst
 
     outPrefix = options.outprefix
     rundir = options.rundir
@@ -1141,13 +1143,17 @@ def flatten_tuple(t):
     else:
         return((c, a, b))
 
-def validate_gtf_requirements(gtf_file, options):
+def validate_gtf_requirements(gtf_file, options, CheckRequirementsEveryNLines=None):
     """
     Validate GTF file and auto-detect attribute names if not specified by user.
+    Optionally perform periodic checks (every N lines) to exit early when all
+    required features/attributes are found.
     
     Args:
         gtf_file: Path to GTF file
         options: argparse options object
+        CheckRequirementsEveryNLines: int or None. If int, check every N lines
+            for completion and break early when satisfied. If None, parse full file.
     
     Returns:
         options: Modified options object with auto-detected attributes
@@ -1164,7 +1170,7 @@ def validate_gtf_requirements(gtf_file, options):
     }
     
     # Required feature types
-    required_features = {'gene', 'exon', 'start_codon', 'stop_codon', 'CDS'}
+    required_features = {'transcript','gene','exon', 'start_codon', 'stop_codon', 'CDS'}
     
     # Track what we find
     found_features = set()
@@ -1172,6 +1178,13 @@ def validate_gtf_requirements(gtf_file, options):
     protein_coding_found = False
     
     logger.info(f"Validating GTF file: {gtf_file}\n")
+    
+    # Helper: are all attribute alternatives present?
+    def _attributes_satisfied():
+        for _, alts in attribute_alternatives.items():
+            if not any(a in found_attributes for a in alts):
+                return False
+        return True
     
     # Parse GTF file
     try:
@@ -1229,7 +1242,12 @@ def validate_gtf_requirements(gtf_file, options):
             for attr_name in ['transcript_type', 'transcript_biotype']:
                 if attr_name in attributes and attributes[attr_name] == 'protein_coding':
                     protein_coding_found = True
-                    
+            
+            # Optional periodic early check
+            if CheckRequirementsEveryNLines and (line_count % int(CheckRequirementsEveryNLines) == 0):
+                if required_features.issubset(found_features) and _attributes_satisfied():
+                    logger.info(f"  Early stop at {line_count} lines: requirements satisfied.\n")
+                    break
         file_handle.close()
         
     except Exception as e:
@@ -1247,7 +1265,7 @@ def validate_gtf_requirements(gtf_file, options):
         logger.error(f"  Found feature types: {sorted(found_features)}\n")
         logger.error("  Required features: gene, exon, start_codon, stop_codon, CDS\n")
         logger.error("  Note: UTR classification is determined from start/stop codons, not UTR features\n")
-        raise SystemExit(1)  # changed from exit(1)
+        raise SystemExit(1)
     
     # Check for protein_coding transcripts
     if not protein_coding_found:
@@ -1267,7 +1285,7 @@ def validate_gtf_requirements(gtf_file, options):
             if current_value not in found_attributes:
                 logger.error(f"Error: User-specified attribute '{current_value}' for {option_name} not found in GTF\n")
                 logger.error(f"Available attributes: {sorted(found_attributes)}\n")
-                raise SystemExit(1)  # changed from exit(1)
+                raise SystemExit(1)
         else:
             # Auto-detect from alternatives
             detected = None
@@ -1284,7 +1302,7 @@ def validate_gtf_requirements(gtf_file, options):
                 logger.error(f"  Looked for: {alternatives}\n") 
                 logger.error(f"  Available attributes: {sorted(found_attributes)}\n")
                 logger.error(f"  Suggestion: Your GTF may use non-standard attribute names\n")
-                raise SystemExit(1)  # changed from exit(1)
+                raise SystemExit(1)
     
     # Print summary of what was used
     if user_specified:
@@ -1323,7 +1341,7 @@ def validate_or_reformat_gtf(gtf_file, options):
     to reformat with Reformat_gtf and re-validate. Updates options.annot.
     """
     try:
-        return validate_gtf_requirements(gtf_file, options)
+        return validate_gtf_requirements(gtf_file, options, CheckRequirementsEveryNLines=1000)
     except SystemExit:
         if getattr(options, 'no_auto_reformat', False):
             logger.error("GTF validation failed and auto-reformat is disabled.")
@@ -1358,7 +1376,7 @@ def validate_or_reformat_gtf(gtf_file, options):
             logger.error(f"Transcript_tools failed: {e}")
             raise SystemExit(1)
         options.annot = reformatted
-        return validate_gtf_requirements(options.annot, options)
+        return validate_gtf_requirements(options.annot, options, CheckRequirementsEveryNLines=1000)
 
 def annotate_noisy(options):
     """Annotate introns
@@ -1565,7 +1583,8 @@ def main(options, libl):
         logger.info("Skipping annotation step...\n")
 
 
-if __name__ == "__main__":
+
+def main_cli():
 
     parser = argparse.ArgumentParser()
     
@@ -1821,13 +1840,6 @@ if __name__ == "__main__":
             
             libl.append(line)  # Keep the full line (with optional sample name)
 
-    chromLst = (
-        [f"chr{x}" for x in range(1, 23)]
-        + ["chrX", "chrY"]
-        + [f"{x}" for x in range(1, 23)]
-        + ["X", "Y"]
-    )
-
     main(options, libl)
 
     if not options.keeptemp:
@@ -1929,3 +1941,7 @@ if __name__ == "__main__":
                     logger.info("Skipping LeafCutter1 file preservation - used provided counts file\n")
 
 # python ../scripts/leafcutter2.py -r example/outtut_dir -A annotation/chr10.gtf.gz -r output_dir -G annotation/chr10.fa.gz -j junction_files.txt -L -gn gene_id tn transcript_id
+
+
+if __name__ == "__main__":
+    main_cli()
