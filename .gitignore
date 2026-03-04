@@ -1,32 +1,36 @@
 # Ignore everything by default
 *
 
-# Un-ignore tracked content
+# Top-level config files
 !.gitignore
 !README.md
 !LICENSE
 !pyproject.toml
 !leafcutter2_env.yml
 
-# Source package
+# Source package — Python files only (avoids un-ignoring __pycache__, .egg-info, etc.)
 !src/
-!src/**
-# ...but not generated build/cache artifacts
-**/__pycache__/
-**/*.pyc
-**/*.egg-info/
+!src/leafcutter2/
+!src/leafcutter2/*.py
 
 # Tests
 !tests/
-!tests/**
-# ...but not pytest cache
-tests/__pycache__/
-.pytest_cache/
+!tests/*.py
+!tests/reference_outputs/
+!tests/reference_outputs/*/
+!tests/reference_outputs/*/*
+!tests/reference_outputs/*/leafcutter1_files/
+!tests/reference_outputs/*/leafcutter1_files/*
 
 # Example data
 !example/
-!example/**
+!example/*.txt
+!example/data/
+!example/data/**
+!example/annotation/
+!example/annotation/**
 
 # GitHub Actions CI
 !.github/
-!.github/**
+!.github/workflows/
+!.github/workflows/*.yml
