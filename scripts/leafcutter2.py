@@ -1063,66 +1063,83 @@ def pick_sjc_label(df):
 def merge_discordant_logics(sjc_file: str):
     '''some junctions have multiple classifications. Use conservative approach
     to merge them.
+
+    OPTIMIZED: Uses vectorized sort + drop_duplicates instead of slow groupby + apply
     '''
 
     classifier = {
         # each bit represents:
         # is_GTFAnnotatedCoding?  is_GTFAnnotated?  is_LF2AnnotatedCoding?  is_ClosetoUTR?
-        '0000': 'UP',
-        '0001': 'NE',
-        '0010': 'PR',
-        '0011': 'PR',
-        '0100': 'UP',
-        '0101': 'NE',
-        '0110': 'PR',
-        '0111': 'PR',
-        '1000': 'PR',
-        '1001': 'PR',
-        '1010': 'PR',
-        '1011': 'PR',
-        '1100': 'PR',
-        '1101': 'PR',
-        '1110': 'PR',
-        '1111': 'PR'
+        '0000': 'UP', '0001': 'NE', '0010': 'PR', '0011': 'PR',
+        '0100': 'UP', '0101': 'NE', '0110': 'PR', '0111': 'PR',
+        '1000': 'PR', '1001': 'PR', '1010': 'PR', '1011': 'PR',
+        '1100': 'PR', '1101': 'PR', '1110': 'PR', '1111': 'PR'
     }
+
+    classifer_3bits = {
+        # each bit represents:
+        # is_GTFAnnotated?  is_LF2AnnotatedCoding?  is_ClosetoUTR?
+        '000': 'UP', '001': 'NE', '010': 'PR', '011': 'PR',
+        '100': 'UP', '101': 'NE', '110': 'PR', '111': 'PR',
+    }
+
+    sjc_priority = {'PR': 1, 'UP': 2, 'NE': 3}
 
     sjc = pd.read_csv(sjc_file, sep="\t")
 
-    # Require ForwardSpliceJunctionClassifier format with Strand column
-    # If missing, raise a clear error instead of using outdated 3-bit logic.
-    if 'Strand' not in sjc.columns:
-        logger.error(f"Error: Expected 'Strand' column in {sjc_file}. Backward/legacy 3-bit classification is deprecated.")
-        raise SystemExit(f"Error: Expected 'Strand' column in {sjc_file}. "
-                         f"Backward/legacy 3-bit classification is deprecated.")
+    # group dt; NOTE:ForwardSpliceJunctionClassifier has an extra Strand column, backward doesn't
+    if 'Strand' in sjc.columns:
+        sjc = sjc[['Gene_name', 'Intron_coord', 'Strand', 'GencodePC', 'Annot', 'Coding', 'UTR']]
 
-    sjc = sjc[['Gene_name', 'Intron_coord', 'Strand', 'GencodePC', 'Annot', 'Coding', 'UTR']]
+        # convert Annotation, Coding, UTR status to SJ categories
+        sjc['SJClass'] = sjc[['GencodePC', 'Annot', 'Coding', 'UTR'
+                              ]].astype(int).astype(str).agg(''.join, axis=1).map(classifier)
 
-    # convert Annotation, Coding, UTR status to SJ categories (4-bit with GencodePC)
-    sjc['SJClass'] = sjc[['GencodePC', 'Annot', 'Coding', 'UTR']].astype(int).astype(str).agg(''.join, axis=1).map(classifier)
+        # Vectorized priority selection (replaces slow groupby + apply)
+        sjc['priority'] = sjc['SJClass'].map(sjc_priority)
+        sjc = sjc.sort_values(['Intron_coord', 'Strand', 'priority'])
+        sjc = sjc.drop_duplicates(subset=['Intron_coord', 'Strand'], keep='first')
+        sjc = sjc[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']]
 
-    # if multiple classifications, take the one with highest priority
-    sjc = sjc.groupby(['Intron_coord', 'Strand'])[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']].apply(pick_sjc_label).reset_index(drop=True)
-    sjc = sjc[['Intron_coord', 'Strand', 'SJClass', 'Gene_name']]
+        # convert df to dict
+        sjc = sjc.set_index(['Intron_coord', 'Strand']).to_dict(orient='index')
+    else:
+        sjc = sjc[['Gene_name', 'Intron_coord', 'Annot', 'Coding', 'UTR']]
 
-    # convert df to dict keyed by (Intron_coord, Strand)
-    sjc = sjc.set_index(['Intron_coord', 'Strand']).to_dict(orient='index')
+        # convert Annotation, Coding, UTR status to SJ categories
+        sjc['SJClass'] = sjc[['Annot', 'Coding', 'UTR'
+                              ]].astype(int).astype(str).agg(''.join, axis=1).map(classifer_3bits)
+
+        # Vectorized priority selection (replaces slow groupby + apply)
+        sjc['priority'] = sjc['SJClass'].map(sjc_priority)
+        sjc = sjc.sort_values(['Intron_coord', 'priority'])
+        sjc = sjc.drop_duplicates(subset=['Intron_coord'], keep='first')
+        sjc = sjc[['Intron_coord', 'SJClass', 'Gene_name']]
+
+        # convert df to dict
+        sjc = sjc.set_index('Intron_coord').to_dict(orient='index')
 
     sjc = {flatten_tuple(k): v for k, v in sjc.items()}
 
     # sjc is a dictionary with:
-    # - keys: intron coordinates, e.g. ('chr1', 1000, 2000, '+')
-    # - values: e.g. {'SJClass': 'UP', 'Gene_name': 'DNMBP'}
+    # - keys: intron coordinates, e.g. ('chr1', 1000, 2000, '+') or ('chr1', 1000, 2000) for backward
+    # - values: a dictionary e.g. {'SJClass': 'UP', 'Gene_name': 'DNMBP'}
     return sjc
 
- 
+
 def flatten_tuple(t):
-    # t: tuple like ('chr1:100-200', '+')
-    # Simplified: we only handle tuple keys from set_index(['Intron_coord','Strand']).
-    c, ab = t[0].split(":")
+    # t: tuple like ('chr1:100-200', '+')' or str 'chr1:100-200'
+    if isinstance(t, tuple):
+        c, ab = t[0].split(":")
+    elif isinstance(t, str):
+        c, ab = t.split(":")
     a, b = ab.split("-")
     a, b = int(a), int(b)
-    s = t[1]
-    return (c, a, b, s)
+    if isinstance(t, tuple):
+        s = t[1]
+        return((c, a, b, s)) # e.g. ('chr1', 100, 200, '+')
+    else:
+        return((c, a, b))
 
 def validate_gtf_requirements(gtf_file, options):
     """
@@ -1431,6 +1448,10 @@ def annotate_noisy(options):
     N_introns_annotated = 0
     N_skipped_introns = 0
 
+    # Determine key format ONCE before the loop (avoids O(n*m) complexity)
+    sample_key = next(iter(sjc.keys()))
+    use_strand = len(sample_key) == 4
+
     for ln in F:
         if type(ln) == bytes:
             ln = ln.decode("utf-8")  # convert bytes to string
@@ -1440,9 +1461,9 @@ def annotate_noisy(options):
         strand = clu.split("_")[-1]
 
         # check if Strand is in sjc keys:
-        if len(list(sjc.keys())[0]) == 4:
+        if use_strand:
             intronid = chrom, int(s), int(e), strand
-        elif len(list(sjc.keys())[0]) == 3:
+        else:
             intronid = chrom, int(s), int(e)
 
         fractions = [x.split("/") for x in ln[1:]]
