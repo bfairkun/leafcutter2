@@ -734,14 +734,6 @@ def parse_gtf(gtf: str,
             except KeyError:
                 dic[standard_key] = None
 
-        # Fallback: use gene_id if gene_name is missing (common in Ensembl GTFs)
-        if dic.get('gene_name') is None and 'gene_id' in info_fields:
-            dic['gene_name'] = info_fields['gene_id']
-
-        # Fallback: use transcript_id if transcript_name is missing
-        if dic.get('transcript_name') is None and 'transcript_id' in info_fields:
-            dic['transcript_name'] = info_fields['transcript_id']
-
         yield dic
          
 
