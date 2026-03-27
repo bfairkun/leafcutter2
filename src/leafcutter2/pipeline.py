@@ -116,6 +116,49 @@ def overlaps(A: tuple, B: tuple):
         return True
 
 
+def load_remove_junctions_bed(bed_path):
+    """Parse a BED file of junctions to exclude from analysis.
+
+    Parameters
+    ----------
+    bed_path : str
+        Path to a BED file (plain text or gzip). Required columns: chrom, start,
+        end (0-based half-open coordinates). If column 6 (strand) is present and
+        is '+' or '-', matching is strand-specific; otherwise the entry matches
+        junctions on either strand.
+
+    Returns
+    -------
+    exclude_stranded : set of (chrom, start, end, strand)
+        Entries from BED rows that specify a strand.
+    exclude_unstranded : set of (chrom, start, end)
+        Entries from BED rows without a strand column (match any strand).
+    """
+    exclude_stranded = set()
+    exclude_unstranded = set()
+
+    opener = gzip.open if bed_path.endswith(".gz") else open
+    with opener(bed_path, "rt") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split()
+            if len(fields) < 3:
+                continue
+            chrom, start, end = fields[0], int(fields[1]), int(fields[2])
+            if len(fields) >= 6 and fields[5] in ("+", "-"):
+                exclude_stranded.add((chrom, start, end, fields[5]))
+            else:
+                exclude_unstranded.add((chrom, start, end))
+
+    logger.info(
+        f"Loaded {len(exclude_stranded)} strand-specific and "
+        f"{len(exclude_unstranded)} unstranded junctions to exclude."
+    )
+    return exclude_stranded, exclude_unstranded
+
+
 def pool_junc_reads(flist, options):
     """Pool junction reads
 
@@ -145,6 +188,12 @@ def pool_junc_reads(flist, options):
     checkchrom = options.checkchrom
     logger.info(f"Max Intron Length: {maxIntronLen}")
     outFile = f"{rundir}/clustering/{outPrefix}_pooled"
+
+    # Load junctions to exclude, if requested
+    if options.remove_junctions:
+        exclude_stranded, exclude_unstranded = load_remove_junctions_bed(options.remove_junctions)
+    else:
+        exclude_stranded, exclude_unstranded = set(), set()
 
     if not os.path.exists(rundir):
         os.mkdir(rundir)
@@ -209,6 +258,10 @@ def pool_junc_reads(flist, options):
             A, B = int(A), int(B) + int(options.offset)
 
             if B - A > int(maxIntronLen):
+                continue
+
+            # skip junctions listed in --remove-junctions BED file
+            if (chrom, A, B) in exclude_unstranded or (chrom, A, B, strand) in exclude_stranded:
                 continue
 
             # sum up all the reads at the same junctions if junctions already exist
@@ -1783,6 +1836,18 @@ def main_cli():
         default=10000,
         type=int,
         help="skip solveNMD function if gene contains more than N juncs. Juncs in skipped genes are assigned Coding=False. Default 10000")
+
+    parser.add_argument(
+        "--remove-junctions",
+        dest="remove_junctions",
+        default=None,
+        metavar="BED",
+        help="BED file of junctions to exclude from all steps (clustering, "
+             "quantification, classification). Any junction whose chrom, start, "
+             "and end match an entry in this file is silently dropped. If the BED "
+             "file includes a strand column (column 6), matching is strand-specific; "
+             "otherwise the junction is excluded regardless of strand. (default: disabled)",
+    )
 
     parser.add_argument(
         "--log-level",
