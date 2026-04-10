@@ -2011,7 +2011,7 @@ def main_cli():
                     except Exception as e:
                         logger.warning(f"Warning: Could not remove {cleanup_file}: {e}\n")
         
-        logger.info(f"Done.\n")
+        logger.info(f"Done - dev2.\n")
         
     if (options.annot == None) or (options.genome == None):
         if not options.const:
@@ -2047,7 +2047,7 @@ def main_cli():
                 if options.verbose:
                     logger.info("Skipping LeafCutter1 file removal - used provided counts file\n")
                     
-            logger.info(f"Done.\n")
+            logger.info(f"Done - dev2.\n")
         else:
             # Only move files if they were generated (not using provided counts file)
             if not options.counts_file:

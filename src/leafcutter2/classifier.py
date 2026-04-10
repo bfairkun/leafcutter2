@@ -496,13 +496,21 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons, gene_name, fa,
                 """Quinn Comment: loop through the exons, calculating lengths"""
                 for i in range(0, len(s)-1, 2):
                     exon_coord = s[i:i+2]
+                    # Skip phantom exon from consecutive junction boundaries (no real exon between them).
+                    # Plus strand: path goes left→right, phantom has exon_coord[0] > exon_coord[1].
+                    # Minus strand: path goes right→left, phantom has exon_coord[0] < exon_coord[1].
+                    if (strand == "+" and exon_coord[0] > exon_coord[1]) or \
+                       (strand == "-" and exon_coord[0] < exon_coord[1]):
+                        continue
                     exon_coord.sort()
                     exon_coord = tuple(exon_coord)
                     exlen = exon_coord[1]-exon_coord[0]
 
+                    if exlen == 0:
+                        continue
 
                     """Quinn Comment: find start position relative to named start of this exon and translate to protein"""
-                    """Quinn Comment: Coordinates from PERIND file and GTF file are exon start and end coordinates, so 
+                    """Quinn Comment: Coordinates from PERIND file and GTF file are exon start and end coordinates, so
                     we must add 1 to length"""
                     endpos = (len(leftover)+exlen+1)%3
                     if strand == '+':
@@ -591,9 +599,9 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons, gene_name, fa,
 
             """Quinn Comment: add all possible places to go from our last_pos to the seed (nested list)"""
             for j0,j1 in junc:                
-                if strand == "+" and last_pos < j0 and j0-last_pos < next_exon_max:
+                if strand == "+" and (last_pos < j0 or last_pos == j0 + 1) and j0-last_pos < next_exon_max:
                     new_seed.append(s+[j0,j1])
-                if strand == "-" and last_pos > j1 and last_pos-j1 < next_exon_max: 
+                if strand == "-" and (last_pos > j1 or last_pos == j1 - 1) and last_pos-j1 < next_exon_max:
                     new_seed.append(s+[j1,j0])
                     
         """Quinn Comment: Exited from s in seed loop, now we check our final_checks of the full paths, we do not
@@ -604,9 +612,14 @@ def solve_NMD(chrom, strand, junc, start_codons, stop_codons, gene_name, fa,
             allprot = Seq("")
             for i in range(0, len(s)-1, 2):
                 exon_coord = s[i:i+2]
+                if (strand == "+" and exon_coord[0] > exon_coord[1]) or \
+                   (strand == "-" and exon_coord[0] < exon_coord[1]):
+                    continue
                 exon_coord.sort()
                 exon_coord = tuple(exon_coord)
                 exlen = exon_coord[1]-exon_coord[0]
+                if exlen == 0:
+                    continue
                 endpos = (len(leftover)+exlen+1)%3
                 if strand == '+':
                     seq = leftover + Seq(fa.fetch(chrom, (exon_coord[0],exon_coord[1])))
