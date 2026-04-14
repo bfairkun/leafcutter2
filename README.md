@@ -168,6 +168,12 @@ options:
   -tn TRANSCRIPT_NAME, --transcript_name TRANSCRIPT_NAME
                         tag for transcript name or ID in GTF file (default: auto-detect
                         from transcript_name, transcript_id)
+  --remove-junctions BED_FILE
+                        BED file of junctions to exclude from all steps (clustering,
+                        quantification, classification). Any junction whose chrom, start,
+                        and end match an entry in this file is silently dropped. If the BED
+                        file includes a strand column (column 6), matching is strand-specific;
+                        otherwise the junction is excluded regardless of strand. (default: disabled)
   --log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}
                         logging level (default INFO)
   --no-auto-reformat-gtf
