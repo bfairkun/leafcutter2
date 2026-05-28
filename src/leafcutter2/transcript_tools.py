@@ -252,6 +252,11 @@ def score_kozak_window(marked_sequence, pssm=None, before=6, after=4):
     """
     Extract window around '^' and score with provided PSSM.
     Returns a 3-decimal string; returns 'NA' on any error and logs a helpful message.
+
+    Note: 'NA' is intentional. A BED/GTF column mixing numeric strings with 'NA'
+    is still parsed correctly by pandas (default na_values includes 'NA', so the
+    column loads as float with NaN for unscored windows). Consumers should treat
+    'NA' as missing.
     """
     try:
         window = extract_kozak_seq(marked_sequence, before=before, after=after)
