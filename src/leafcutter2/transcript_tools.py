@@ -630,7 +630,7 @@ def get_NMD_detective_B_classification(sequence):
         return "Last exon"
     elif len(CDS.group(1)) <= 125:
         return "Start proximal"
-    elif len(InternalStopExon.group(2)) >= 407:
+    elif InternalStopExon is not None and len(InternalStopExon.group(2)) >= 407:
         return "Long exon"
     elif re.search(r"\*[ACGTNacgtn]{0,50}\|[ACGTNacgtn]+$", sequence):
         return "50 nt rule"
