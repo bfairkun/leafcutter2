@@ -1254,11 +1254,11 @@ def main(args=None):
         logging.info('Writing gene (parent) feature coordiantes and based on child (transcript) feature coordinates')
         for gene, chrom_dict in gene_coords_dict.items():
             for chrom, strand_dict in chrom_dict.items():
-                for StrandIteration, (strand, info_dict) in enumerate(strand_dict.items()):
+                for strand, info_dict in strand_dict.items():
                     min_start = min(info_dict['start'])
                     max_stop = max(info_dict['end'])
                     _ = gtf_stringio.write(f'{chrom}\tinput_gtf\tgene\t{min_start+1}\t{max_stop}\t.\t{strand}\t.\tgene_id "{gene}";\n')
-                if StrandIteration > 0:
+                if len(strand_dict) > 1:
                     logging.warning(f"Transcripts for gene {gene} on {chrom} are on different strands. Writing {gene} gene feature on {chrom} for more than one strand")
 
         logging.info('Writing gene_type attributes')
