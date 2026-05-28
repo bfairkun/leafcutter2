@@ -20,6 +20,7 @@ import pyfastx
 import subprocess
 from io import StringIO
 from collections import defaultdict
+from dataclasses import dataclass, field
 import shutil
 import pandas as pd
 import csv
@@ -30,6 +31,14 @@ from Bio import bgzf
 from Bio import motifs
 from Bio.Seq import Seq
 import random
+
+
+@dataclass
+class _GeneCoordSpan:
+    """Collected transcript start/end coordinates for one (gene, chrom, strand)."""
+    starts: set = field(default_factory=set)
+    ends: set = field(default_factory=set)
+
 
 def reorder_gtf(gtf_stringio, output_gtf, mode='w'):
     """Reorder GTF lines by gene and transcript, ensuring correct hierarchical sorting,
@@ -1056,8 +1065,8 @@ def main(args=None):
     if args.gtf_out:
         gtf_stringio = StringIO()
         # Initialize an empty dictionary to keep coordinates of each transcript for each gene. Will need to write out gene coordinates as most extensive span of child transcripts on each chromosome:strand pair, because some genes appear on more than one chromosome, (eg X and Y in Gencode gtf), or even on the same chromosome but different strands (eg some TRNAA gene appears on chr6 + strand and chr6 - strand in human RefSeq annotations from UCSC)
-        gene_coords_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda : defaultdict(set))))
-        # gene_coords_dict[gene_id][transcript.chr][transcript.strand]['end'] = SetOfTranscriptEnds
+        # gene_coords_dict[gene_id][chrom][strand] -> _GeneCoordSpan(starts, ends)
+        gene_coords_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(_GeneCoordSpan)))
     else:
         gtf_stringio = None
         gene_coords_dict = None
@@ -1222,11 +1231,9 @@ def main(args=None):
             if args.gtf_out and gene_coords_dict is not None:
                 chrom = transcript_out.chr
                 strand = transcript_out.strand
-                # initialize nested sets
-                _ = gene_coords_dict[gene_id][chrom][strand]['start']
-                _ = gene_coords_dict[gene_id][chrom][strand]['end']
-                gene_coords_dict[gene_id][chrom][strand]['start'].add(transcript_out.start)
-                gene_coords_dict[gene_id][chrom][strand]['end'].add(transcript_out.end)
+                span = gene_coords_dict[gene_id][chrom][strand]
+                span.starts.add(transcript_out.start)
+                span.ends.add(transcript_out.end)
 
             # Track gene types and transcript types seen (for later gene_type inference)
             gtinfo = gene_types_dict[gene_id]
@@ -1276,9 +1283,9 @@ def main(args=None):
         logging.info('Writing gene (parent) feature coordiantes and based on child (transcript) feature coordinates')
         for gene, chrom_dict in gene_coords_dict.items():
             for chrom, strand_dict in chrom_dict.items():
-                for strand, info_dict in strand_dict.items():
-                    min_start = min(info_dict['start'])
-                    max_stop = max(info_dict['end'])
+                for strand, span in strand_dict.items():
+                    min_start = min(span.starts)
+                    max_stop = max(span.ends)
                     _ = gtf_stringio.write(f'{chrom}\tinput_gtf\tgene\t{min_start+1}\t{max_stop}\t.\t{strand}\t.\tgene_id "{gene}";\n')
                 if len(strand_dict) > 1:
                     logging.warning(f"Transcripts for gene {gene} on {chrom} are on different strands. Writing {gene} gene feature on {chrom} for more than one strand")
