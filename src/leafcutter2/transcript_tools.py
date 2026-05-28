@@ -1,4 +1,15 @@
 #!/usr/bin/env python
+"""Reformat/annotate GTFs and BED12 for SpliceJunctionClassifier compatibility.
+
+Translates transcripts, runs NMDetectiveB classification, computes UTR/CDS
+stats, Kozak scores and (optionally) uORF analysis, and writes a re-annotated
+GTF and/or extended BED12.
+
+Side effect on import: this module monkey-patches bedparse.bedline with
+extract_sequence() and reverse_complement() (see bottom of the file). Importing
+this module therefore alters bedparse.bedline globally for the whole process,
+not just for code in this module.
+"""
 
 import sys
 import bedparse
@@ -329,7 +340,11 @@ def extract_sequence(self, fasta_obj, AddMarksForORF=False):
     block_starts = list(map(int, self.exStarts.split(','))) if hasattr(self, 'exStarts') else [0]
 
     sequence = ''
-    # Retrieve the sequence for each block and concatenate them
+    # Retrieve the sequence for each block and concatenate them.
+    # bedline coordinates are BED 0-based half-open; pyfastx.fetch expects a
+    # 1-based inclusive (start, end) tuple, so block_start gets +1 while the
+    # exclusive block_end becomes the inclusive 1-based end as-is. Do not drop
+    # the +1 — it converts the coordinate systems.
     try:
         if block_sizes and block_starts:
             for block_start, block_size in zip(block_starts, block_sizes):
