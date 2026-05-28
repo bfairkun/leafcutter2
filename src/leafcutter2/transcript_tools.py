@@ -21,6 +21,7 @@ import subprocess
 from io import StringIO
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import IO
 import shutil
 import pandas as pd
 import csv
@@ -51,7 +52,7 @@ _NMD_LAST_EXON_RE = re.compile(r"(^|\|)[\^ACGTNacgtn]*\*[ACGTNacgtn]*$")
 _NMD_50NT_RE = re.compile(r"\*[ACGTNacgtn]{0,50}\|[ACGTNacgtn]+$")
 
 
-def reorder_gtf(gtf_stringio: StringIO, output_gtf, mode: str = 'w') -> None:
+def reorder_gtf(gtf_stringio: "IO[str]", output_gtf, mode: str = 'w') -> None:
     """Reorder GTF lines by gene and transcript, ensuring correct hierarchical sorting,
     and write to output file."""
     # Read the GTF data into a pandas DataFrame
@@ -916,18 +917,20 @@ def get_absolute_pos(bedline: "bedparse.bedline", coord: int) -> int:
                 break
     return absolute_pos
 
-def add_gene_type_to_gtf(gtf_io: StringIO, gene_type_dict: dict) -> StringIO:
+def add_gene_type_to_gtf(gtf_io: "IO[str]", gene_type_dict: dict) -> "IO[str]":
     """
-    Add gene_type attribute to a GTF file stored in a StringIO object.
+    Add gene_type attribute to GTF data held in a readable text file object
+    (StringIO or an on-disk temp file).
     Parameters:
-    gtf_io (StringIO): StringIO object containing the GTF file data.
+    gtf_io: readable text file object containing the GTF data.
     gene_type_dict (dict): Dictionary mapping gene_name to gene_type.
     Returns:
-    StringIO: A new StringIO object with the updated GTF data.
+    A new readable text temp file (seeked to 0) with the updated GTF data. The
+    caller is responsible for closing/removing it.
     """
-    # Create a new StringIO object to store the modified GTF content
-    updated_gtf_io = StringIO()
-    # Seek to the beginning of the input StringIO object
+    # Stream to an on-disk temp file rather than a second in-memory copy.
+    updated_gtf_io = _new_gtf_tmp_file()
+    # Seek to the beginning of the input object
     gtf_io.seek(0)
     # Read and process each line
     for line in gtf_io:
@@ -983,6 +986,12 @@ def parse_args(args=None):
 def setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def _new_gtf_tmp_file():
+    """Create a readable+writable on-disk text temp file for streaming GTF data.
+    delete=False so it survives until the caller explicitly removes it."""
+    return tempfile.NamedTemporaryFile(mode='w+', suffix='.gtf', delete=False)
+
 
 def _open_bgzip_aware(path, text_mode=True):
     """Open path for writing, using BGZF for .gz/.bgz outputs.
@@ -1100,7 +1109,8 @@ def main(args=None):
     
     # Initialize GTF-specific variables only if GTF output is requested
     if args.gtf_out:
-        gtf_stringio = StringIO()
+        # Accumulate transcript GTF records on disk rather than in memory.
+        gtf_stringio = _new_gtf_tmp_file()
         # Initialize an empty dictionary to keep coordinates of each transcript for each gene. Will need to write out gene coordinates as most extensive span of child transcripts on each chromosome:strand pair, because some genes appear on more than one chromosome, (eg X and Y in Gencode gtf), or even on the same chromosome but different strands (eg some TRNAA gene appears on chr6 + strand and chr6 - strand in human RefSeq annotations from UCSC)
         # gene_coords_dict[gene_id][chrom][strand] -> _GeneCoordSpan(starts, ends)
         gene_coords_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(_GeneCoordSpan)))
@@ -1362,6 +1372,14 @@ def main(args=None):
                 df = pd.read_csv(gtf_stringio_updated, sep='\t', names=columns, comment='#', dtype=dtype_map)
                 df_sorted = df.sort_values(by=['seqname', 'start', 'end']).reset_index(drop=True)
                 df_sorted.to_csv(output_fh, sep='\t', header=False, index=False, mode='a', quoting=csv.QUOTE_NONE)
+
+        # Remove the on-disk temp files used to stream GTF records.
+        for _tmp in (gtf_stringio, gtf_stringio_updated):
+            try:
+                _tmp.close()
+                os.unlink(_tmp.name)
+            except Exception:
+                pass
     else:
         logging.info('GTF output disabled - skipping GTF processing and sorting')
 
