@@ -594,7 +594,11 @@ def Is_bedline_complete(bedline):
     """
     after run_bedparse_gtf2bed, if a transcript feature is read but only some of the child exons, then transcript feature spans longer than all the child exons and the bedline object is buggy.
     """
-    return int(bedline.exStarts.split(',')[-1] ) + int(bedline.exLengths.split(',')[-1] ) + bedline.start == bedline.end
+    # Some bedparse versions emit a trailing comma in exStarts/exLengths;
+    # rstrip(',') before splitting so the final field is never an empty string.
+    last_start = int(bedline.exStarts.rstrip(',').split(',')[-1])
+    last_length = int(bedline.exLengths.rstrip(',').split(',')[-1])
+    return last_start + last_length + bedline.start == bedline.end
 
 
 def get_NMD_detective_B_classification(sequence):
