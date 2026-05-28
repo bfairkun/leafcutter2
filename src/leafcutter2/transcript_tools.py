@@ -40,7 +40,7 @@ class _GeneCoordSpan:
     ends: set = field(default_factory=set)
 
 
-def reorder_gtf(gtf_stringio, output_gtf, mode='w'):
+def reorder_gtf(gtf_stringio: StringIO, output_gtf, mode: str = 'w') -> None:
     """Reorder GTF lines by gene and transcript, ensuring correct hierarchical sorting,
     and write to output file."""
     # Read the GTF data into a pandas DataFrame
@@ -230,7 +230,7 @@ def load_jaspar_pfm_pssm(pfm_path, pseudocount=0.5):
     pssm = pwm.log_odds()
     return pwm, pssm
 
-def extract_kozak_seq(marked_sequence, before=6, after=4):
+def extract_kozak_seq(marked_sequence: str, before: int = 6, after: int = 4) -> str:
     """
     Extract sequence surrounding '^' from `before` nt before the marker to `after` nt after the marker.
     Removes '|' and '*' before computing indices. Returns the nucleotide string (no markers).
@@ -257,7 +257,7 @@ def extract_kozak_seq(marked_sequence, before=6, after=4):
     # Remove the caret before returning the nucleotide sequence
     return window.replace('^', '')
 
-def score_kozak_window(marked_sequence, pssm=None, before=6, after=4):
+def score_kozak_window(marked_sequence: str, pssm=None, before: int = 6, after: int = 4) -> str:
     """
     Extract window around '^' and score with provided PSSM.
     Returns a 3-decimal string; returns 'NA' on any error and logs a helpful message.
@@ -294,7 +294,7 @@ def score_kozak_window(marked_sequence, pssm=None, before=6, after=4):
         logging.debug(f"score_kozak_window: exception during scoring ({e})")
         return 'NA'
 
-def count_bars_until_n_position(sequence, n):
+def count_bars_until_n_position(sequence: str, n: int) -> int:
     bar_count = 0
     non_bar_count = 0
     for i,char in enumerate(sequence):
@@ -385,7 +385,7 @@ def extract_sequence(self, fasta_obj, AddMarksForORF=False):
         sequence = AddORF_Marks(sequence, cds_relative_start, cds_relative_end)
     return sequence
 
-def reverse_complement(seq):
+def reverse_complement(seq: str) -> str:
     # Helper function to reverse complement a DNA sequence
     complement = str.maketrans('ATCGatcg', 'TAGCtagc')
     return seq.translate(complement)[::-1]
@@ -394,7 +394,7 @@ def reverse_complement(seq):
 bedparse.bedline.extract_sequence = extract_sequence
 bedparse.bedline.reverse_complement = staticmethod(reverse_complement)
 
-def insert_marks_for_longset_ORF(sequence, require_ATG=True, require_STOP=True, min_ORF_len=0):
+def insert_marks_for_longset_ORF(sequence: str, require_ATG: bool = True, require_STOP: bool = True, min_ORF_len: int = 0) -> str:
     """
     return sequence with "^" to mark start codon, "*" to mark stop for longest ORF that meets minimum length requirement.
     If not require_ATG, can start translation from beginning, which could be useful if transcript starts are not well defined. 
@@ -439,7 +439,7 @@ def insert_marks_for_longset_ORF(sequence, require_ATG=True, require_STOP=True, 
     else:
         return sequence
 
-def insert_marks_for_first_ORF(sequence, require_STOP=True, min_ORF_len=0):
+def insert_marks_for_first_ORF(sequence: str, require_STOP: bool = True, min_ORF_len: int = 0) -> str:
     """
     return sequence with "^" to mark start codon, "*" to mark stop for first ORF. If not require_STOP, translation does not need stop codon at end. "|" characters (which I use mark splice junctions) are ignored, allowing codons to cross exon junctions. min_ORF_len in codons after start codon.
     """
@@ -469,7 +469,7 @@ def insert_marks_for_first_ORF(sequence, require_STOP=True, min_ORF_len=0):
     return sequence
 
 
-def insert_marks_for_defined_ORF(sequence, start_codon_pos=None):
+def insert_marks_for_defined_ORF(sequence: str, start_codon_pos: int = None) -> str:
     """
     return sequence with "^" to mark start codon at provided string position, "*" to mark stop for longest ORF. If no stop codon is found, then no * will be inserted.
     """
@@ -489,7 +489,7 @@ def insert_marks_for_defined_ORF(sequence, start_codon_pos=None):
     else:
         return sequence
 
-def find_uorfs(seq):
+def find_uorfs(seq: str) -> list:
     junk = {"|", "^", "*"}
     stops = {"TAA", "TAG", "TGA"}
 
@@ -619,7 +619,7 @@ def Analyze_uORFs(sequence, bedline, pssm=None):
         ";".join(scores) if scores else ""
     )
 
-def Is_bedline_complete(bedline):
+def Is_bedline_complete(bedline: "bedparse.bedline") -> bool:
     """
     after run_bedparse_gtf2bed, if a transcript feature is read but only some of the child exons, then transcript feature spans longer than all the child exons and the bedline object is buggy.
     """
@@ -630,7 +630,7 @@ def Is_bedline_complete(bedline):
     return last_start + last_length + bedline.start == bedline.end
 
 
-def get_NMD_detective_B_classification(sequence):
+def get_NMD_detective_B_classification(sequence: str) -> str:
     """
     sequence should be marked with '^' for start, '*' for stop, and '|' for splice juncs
     """
@@ -651,21 +651,21 @@ def get_NMD_detective_B_classification(sequence):
     else:
         return "Trigger NMD"
 
-def get_NMD_detective_B_classification_number(NMD_detective_B_classification):
+def get_NMD_detective_B_classification_number(NMD_detective_B_classification: str) -> int:
     OrdinalDict = {"Last exon":1,"Start proximal":2,"50 nt rule":3, "Long exon":4,"Trigger NMD":5, "No stop":6, "No CDS":7}
     try: 
         return OrdinalDict[NMD_detective_B_classification]
     except KeyError:
         return 8
 
-def get_NMD_detective_B_classification_color(NMD_detective_B_classification):
+def get_NMD_detective_B_classification_color(NMD_detective_B_classification: str) -> str:
     OrdinalDict = {"Last exon":"#08519c","Start proximal":"#6baed6","50 nt rule":"#c6dbef", "Long exon":"#fcbba1","Trigger NMD":"#de2d26", "No stop":"#a50f15", "No CDS":"#969696"}
     try: 
         return OrdinalDict[NMD_detective_B_classification]
     except KeyError:
         return "#252525"
 
-def calculate_frames(bedline):
+def calculate_frames(bedline: "bedparse.bedline") -> list:
     """Return the GTF phase for each CDS block, in genomic (left-to-right) order.
 
     GTF/GFF column 8 is the *phase*: the number of bases to remove from the
@@ -693,7 +693,7 @@ def calculate_frames(bedline):
         phases = [(3 - frame) % 3 for frame in frames]
         return phases
     
-def extract_codon(bedline, codon_type='start'):
+def extract_codon(bedline: "bedparse.bedline", codon_type: str = 'start') -> "bedparse.bedline":
     """
     Extract the start or stop codon from a BED12 object.
     
@@ -777,14 +777,14 @@ def extract_codon(bedline, codon_type='start'):
         block_starts
     ])
 
-def gtf_formatted_bedline_tx(bedline, source='.', attributes_str=''):
+def gtf_formatted_bedline_tx(bedline: "bedparse.bedline", source: str = '.', attributes_str: str = '') -> str:
     """
     input bedparse.bedline transcript object, return 9 field gtf line string, where the source and attributes fields are provided as optional argument, since those information cannot be inferred from the bedline object 
     """
     gtf_fields = [bedline.chr, source, 'transcript', str(bedline.start + 1), str(bedline.end), str(bedline.score), bedline.strand, '.', attributes_str]
     return '\t'.join(gtf_fields) + '\n'
 
-def gtf_formatted_bedline_exons(bedline, source='.', attributes_str=''):
+def gtf_formatted_bedline_exons(bedline: "bedparse.bedline", source: str = '.', attributes_str: str = '') -> str:
     """
     input bedparse.bedline transcript object, return 9 field gtf line strings, where the source and attributes fields are provided as optional argument, since those information cannot be inferred from the bedline object 
     """
@@ -794,7 +794,7 @@ def gtf_formatted_bedline_exons(bedline, source='.', attributes_str=''):
         string_to_return += '\t'.join(gtf_fields) + '\n'
     return string_to_return
 
-def gtf_formatted_bedline_cds(bedline, source='.', attributes_str=''):
+def gtf_formatted_bedline_cds(bedline: "bedparse.bedline", source: str = '.', attributes_str: str = '') -> str:
     """
     input bedparse.bedline transcript object, return 9 field gtf line strings, where the source and attributes fields are provided as optional argument, since those information cannot be inferred from the bedline object 
     """
@@ -807,7 +807,7 @@ def gtf_formatted_bedline_cds(bedline, source='.', attributes_str=''):
 
 
 
-def gtf_formatted_bedline_utr_start_stop(bedline, source='.', attributes_str='', filter_NF_in_attributes_str=True):
+def gtf_formatted_bedline_utr_start_stop(bedline: "bedparse.bedline", source: str = '.', attributes_str: str = '', filter_NF_in_attributes_str: bool = True) -> str:
     """
     input bedparse.bedline transcript object, return 9 field gtf line strings, where the source and attributes fields are provided as optional argument, since those information cannot be inferred from the bedline object. Note that start and stop have frame attribute that may be non-zero if ATG cross exon boundary. In Gencode (and maybe ensembl... have to check), when a start codon traverses an exon junction, exists as two lines, one for each piece of the codon. If the attributes string contains 'NF' (as in 'mRNA_end_NF'), don't write out start or stop codon.
     """
@@ -836,14 +836,14 @@ def gtf_formatted_bedline_utr_start_stop(bedline, source='.', attributes_str='',
                 string_to_return += '\t'.join(gtf_fields) + '\n'
     return string_to_return
 
-def bed12_formatted_bedline(bedline, attributes_str='', color=''):
+def bed12_formatted_bedline(bedline: "bedparse.bedline", attributes_str: str = '', color: str = '') -> str:
     bed12_fields = [bedline.chr, bedline.start, bedline.end, bedline.name, bedline.score, bedline.strand, bedline.cdsStart, bedline.cdsEnd, color, bedline.nEx, bedline.exLengths, bedline.exStarts]
     return '\t'.join([str(i) for i in bed12_fields]) + attributes_str + '\n'
     
-def get_transcript_length(bedline):
+def get_transcript_length(bedline: "bedparse.bedline") -> int:
     return sum([int(i) for i in bedline.exLengths.split(',')])
 
-def get_tx_stats(bedline, fasta_obj):
+def get_tx_stats(bedline: "bedparse.bedline", fasta_obj) -> dict:
     """
     Return dict of potential useful stats/attributes about the transcript
     """
@@ -876,7 +876,7 @@ def get_thickStart_thickStop_from_marked_seq(bedline, ORF_marked_sequence):
         return tuple(sorted([FivePrimeEdge, ThreePrimeEdge]))
     return bedline.cdsStart, bedline.cdsEnd
 
-def get_absolute_pos(bedline, coord):
+def get_absolute_pos(bedline: "bedparse.bedline", coord: int) -> int:
     """
     Similar to bedline.tx2genome(coord, stranded=True), but I think that function is buggy and doesn't work for getting last base in tx
     """
@@ -899,7 +899,7 @@ def get_absolute_pos(bedline, coord):
                 break
     return absolute_pos
 
-def add_gene_type_to_gtf(gtf_io, gene_type_dict):
+def add_gene_type_to_gtf(gtf_io: StringIO, gene_type_dict: dict) -> StringIO:
     """
     Add gene_type attribute to a GTF file stored in a StringIO object.
     Parameters:
@@ -963,7 +963,7 @@ def parse_args(args=None):
     return parser.parse_args(args)
 
 
-def setup_logging(verbose):
+def setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
 
