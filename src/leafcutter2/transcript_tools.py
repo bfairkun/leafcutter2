@@ -42,6 +42,7 @@ class _GeneCoordSpan:
 
 # Pre-compiled regexes used on the per-transcript hot path.
 _CLEAN_MARKS_RE = re.compile(r'[\^\|\*]')  # strip ^ start, | junction, * stop markers
+_MARK_CHARS = frozenset('^|*')  # same marker set, for O(1) membership tests
 _STOP_CODON_END_RE = re.compile(r'(?:\|?T\|?A\|?A|\|?T\|?A\|?G|\|?T\|?G\|?A)$', re.IGNORECASE)
 _NMD_CDS_RE = re.compile(r"\^(\w+)\**")
 _NMD_INTERNAL_STOP_EXON_RE = re.compile(r"(^|\|)([\^ACGTNacgtn]*\*[ACGTNacgtn]*)\|")
@@ -591,14 +592,20 @@ def Analyze_uORFs(sequence, bedline, pssm=None):
     uorf_seqs = find_uorfs(sequence)
     if not uorf_seqs:
         return "", "", "", "", "", ""
-    clean_main_start = len(_CLEAN_MARKS_RE.sub('', sequence[:main_orf_index]))
+    # Precompute, for each index i, the count of non-marker chars in sequence[:i].
+    # clean_len_before[i] == len(_CLEAN_MARKS_RE.sub('', sequence[:i])), computed
+    # once in O(len) instead of re-cleaning overlapping prefixes per uORF.
+    clean_len_before = [0] * (len(sequence) + 1)
+    for idx, ch in enumerate(sequence):
+        clean_len_before[idx + 1] = clean_len_before[idx] + (0 if ch in _MARK_CHARS else 1)
+    clean_main_start = clean_len_before[main_orf_index]
     starts, stops, classes, lengths, relpos, scores = [], [], [], [], [], []
     for uorf in uorf_seqs:
         uorf_start_marked = sequence.find(uorf)
         uorf_end_marked = uorf_start_marked + len(uorf)
         classification = "uORF" if uorf_end_marked <= main_orf_index else "Overlapping_uORF"
-        clean_start = len(_CLEAN_MARKS_RE.sub('',sequence[:uorf_start_marked]))
-        clean_end = len(_CLEAN_MARKS_RE.sub('',sequence[:uorf_end_marked])) - 1
+        clean_start = clean_len_before[uorf_start_marked]
+        clean_end = clean_len_before[uorf_end_marked] - 1
         try:
             gstart = get_absolute_pos(bedline, clean_start)
         except Exception:
