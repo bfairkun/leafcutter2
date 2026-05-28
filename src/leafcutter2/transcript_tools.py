@@ -1210,12 +1210,12 @@ def main(args=None):
             gtinfo = gene_types_dict[gene_id]
             if 'gene_types_in_input' not in gtinfo:
                 gtinfo['gene_types_in_input'] = set()
-            if 'trancscript_types' not in gtinfo:
-                gtinfo['trancscript_types'] = set()
+            if 'transcript_types' not in gtinfo:
+                gtinfo['transcript_types'] = set()
             if gene_type:
                 gtinfo['gene_types_in_input'].add(gene_type)
             if transcript_type:
-                gtinfo['trancscript_types'].add(transcript_type)
+                gtinfo['transcript_types'].add(transcript_type)
 
             # Write to GTF only if GTF output is enabled
             if args.gtf_out:
@@ -1269,7 +1269,7 @@ def main(args=None):
                     raise ValueError(f"{gene} does not have a single gene_type in input")
                 gene_types_dict_final[gene] = list(info_dict['gene_types_in_input'])[0]
             elif args.infer_gene_type_approach == "B":
-                gene_types_dict_final[gene] = "protein_coding" if "protein_coding" in info_dict['trancscript_types'] else "noncoding"
+                gene_types_dict_final[gene] = "protein_coding" if "protein_coding" in info_dict['transcript_types'] else "noncoding"
         # Write out gene_type attributes
         gtf_stringio_updated = add_gene_type_to_gtf(gtf_stringio, gene_types_dict_final)
 
