@@ -1189,8 +1189,6 @@ def main(args=None):
                 transcript_type_out = "protein_coding" if transcript.cds() else "noncoding"
             elif  args.infer_transcript_type_approach == 'C':
                 transcript_type_out = "protein_coding" if NMDFinderB_number < args.NMDetectiveB_coding_threshold else "noncoding"
-            extra_calculated_transcript_attributes = get_tx_stats(transcript_out, fasta_obj)
-            
             # Build all transcript attributes in one place
             transcript_attributes = f'transcript_id "{transcript_id}"; gene_id "{gene_id}"; transcript_type "{transcript_type_out}"; tag "NMDFinderB:{NMDFinderB_NoWhitespace}";'
 
