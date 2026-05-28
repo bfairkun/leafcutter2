@@ -21,6 +21,10 @@
 !tests/reference_outputs/*/*
 !tests/reference_outputs/*/leafcutter1_files/
 !tests/reference_outputs/*/leafcutter1_files/*
+!tests/fixtures/
+!tests/fixtures/**
+!tests/golden/
+!tests/golden/**
 
 # Example data
 !example/
