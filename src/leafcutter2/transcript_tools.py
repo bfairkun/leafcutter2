@@ -1129,62 +1129,60 @@ def main(args=None):
             transcript_attributes = f'transcript_id "{transcript_id}"; gene_id "{gene_id}";'
             transcript_out = transcript
             NMDFinderB = "NA"
-            #Determine NMDetectiveB classification
-            try:
-                if args.translation_approach == 'A':
-                    if transcript.cds() and transcript.utr(which=5) and transcript.utr(which=3):
-                        source = "input_gtf"
-                        sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                    elif transcript.cds() and transcript.utr(which=5) and not transcript.utr(which=3):
-                        source = "LongestORF_NoStopRequired"
-                        sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
-                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    elif transcript.cds() and not transcript.utr(which=5) and transcript.utr(which=3):
-                        source = "LongestORF_NoStartRequired"
-                        sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
-                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    else:
-                        source = "LongestORF_NeitherRequired"
-                        sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=False, require_STOP = False)
-                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    NMDFinderB = get_NMD_detective_B_classification(sequence)
-                elif args.translation_approach == 'B':
+            # Determine NMDetectiveB classification. translation_approach is
+            # restricted to A-F by argparse choices, so every path below assigns
+            # `sequence` and `NMDFinderB`; no fallback catch is needed.
+            if args.translation_approach == 'A':
+                if transcript.cds() and transcript.utr(which=5) and transcript.utr(which=3):
+                    source = "input_gtf"
                     sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                    NMDFinderB = get_NMD_detective_B_classification(sequence)
-                elif args.translation_approach == 'C':
-                    if transcript.cds():
-                        sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                        source = "input_gtf"
-                    else:
-                        source = "FirstORF_NoStopRequired"
-                        sequence = insert_marks_for_first_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False, min_ORF_len = args.min_new_ORF_length)
-                        thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                        transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    NMDFinderB = get_NMD_detective_B_classification(sequence)
-                elif args.translation_approach == 'D':
+                elif transcript.cds() and transcript.utr(which=5) and not transcript.utr(which=3):
+                    source = "LongestORF_NoStopRequired"
+                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
+                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                elif transcript.cds() and not transcript.utr(which=5) and transcript.utr(which=3):
+                    source = "LongestORF_NoStartRequired"
+                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
+                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                else:
+                    source = "LongestORF_NeitherRequired"
+                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=False, require_STOP = False)
+                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                NMDFinderB = get_NMD_detective_B_classification(sequence)
+            elif args.translation_approach == 'B':
+                sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
+                NMDFinderB = get_NMD_detective_B_classification(sequence)
+            elif args.translation_approach == 'C':
+                if transcript.cds():
+                    sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
+                    source = "input_gtf"
+                else:
                     source = "FirstORF_NoStopRequired"
                     sequence = insert_marks_for_first_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False, min_ORF_len = args.min_new_ORF_length)
                     thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
                     transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    NMDFinderB = get_NMD_detective_B_classification(sequence)
-                elif args.translation_approach == 'E':
-                    source = "LongestORF_WithMinLength"
-                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=True, min_ORF_len=args.min_new_ORF_length)
-                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    NMDFinderB = get_NMD_detective_B_classification(sequence)
-                elif args.translation_approach == 'F':
-                    source = "LongestORF_NoStopRequired"
-                    sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=False, min_ORF_len=args.min_new_ORF_length)
-                    thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
-                    transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                    NMDFinderB = get_NMD_detective_B_classification(sequence)
-            except NameError as e:
-                logging.error(f"NameError encountered while processing transcript {transcript.name}: {e}")
-                continue
+                NMDFinderB = get_NMD_detective_B_classification(sequence)
+            elif args.translation_approach == 'D':
+                source = "FirstORF_NoStopRequired"
+                sequence = insert_marks_for_first_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False, min_ORF_len = args.min_new_ORF_length)
+                thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                NMDFinderB = get_NMD_detective_B_classification(sequence)
+            elif args.translation_approach == 'E':
+                source = "LongestORF_WithMinLength"
+                sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=True, min_ORF_len=args.min_new_ORF_length)
+                thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                NMDFinderB = get_NMD_detective_B_classification(sequence)
+            elif args.translation_approach == 'F':
+                source = "LongestORF_NoStopRequired"
+                sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_ATG=True, require_STOP=False, min_ORF_len=args.min_new_ORF_length)
+                thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
+                transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
+                NMDFinderB = get_NMD_detective_B_classification(sequence)
             NMDFinderB_NoWhitespace = NMDFinderB.replace(' ', '_')
             NMDFinderB_number = get_NMD_detective_B_classification_number(NMDFinderB)
             # Determine transcript_type
@@ -1284,9 +1282,16 @@ def main(args=None):
         gene_types_dict_final = dict()
         for gene, info_dict in gene_types_dict.items():
             if args.infer_gene_type_approach == "A":
-                if len(info_dict['gene_types_in_input']) != 1: 
-                    raise ValueError(f"{gene} does not have a single gene_type in input")
-                gene_types_dict_final[gene] = list(info_dict['gene_types_in_input'])[0]
+                gene_types_in_input = info_dict['gene_types_in_input']
+                if len(gene_types_in_input) == 1:
+                    gene_types_dict_final[gene] = next(iter(gene_types_in_input))
+                elif len(gene_types_in_input) == 0:
+                    logging.warning(f"{gene} has no gene_type in input; using 'unknown_gene_type'")
+                    gene_types_dict_final[gene] = "unknown_gene_type"
+                else:
+                    chosen = "protein_coding" if "protein_coding" in gene_types_in_input else sorted(gene_types_in_input)[0]
+                    logging.warning(f"{gene} has multiple gene_types in input {sorted(gene_types_in_input)}; using '{chosen}'")
+                    gene_types_dict_final[gene] = chosen
             elif args.infer_gene_type_approach == "B":
                 gene_types_dict_final[gene] = "protein_coding" if "protein_coding" in info_dict['transcript_types'] else "noncoding"
         # Write out gene_type attributes
