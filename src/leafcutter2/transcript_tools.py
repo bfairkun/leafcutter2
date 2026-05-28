@@ -40,6 +40,16 @@ class _GeneCoordSpan:
     ends: set = field(default_factory=set)
 
 
+# Pre-compiled regexes used on the per-transcript hot path.
+_CLEAN_MARKS_RE = re.compile(r'[\^\|\*]')  # strip ^ start, | junction, * stop markers
+_STOP_CODON_END_RE = re.compile(r'(?:\|?T\|?A\|?A|\|?T\|?A\|?G|\|?T\|?G\|?A)$', re.IGNORECASE)
+_NMD_CDS_RE = re.compile(r"\^(\w+)\**")
+_NMD_INTERNAL_STOP_EXON_RE = re.compile(r"(^|\|)([\^ACGTNacgtn]*\*[ACGTNacgtn]*)\|")
+_NMD_NO_STOP_RE = re.compile(r"\^[\w|]+$")
+_NMD_LAST_EXON_RE = re.compile(r"(^|\|)[\^ACGTNacgtn]*\*[ACGTNacgtn]*$")
+_NMD_50NT_RE = re.compile(r"\*[ACGTNacgtn]{0,50}\|[ACGTNacgtn]+$")
+
+
 def reorder_gtf(gtf_stringio: StringIO, output_gtf, mode: str = 'w') -> None:
     """Reorder GTF lines by gene and transcript, ensuring correct hierarchical sorting,
     and write to output file."""
@@ -417,7 +427,7 @@ def insert_marks_for_longset_ORF(sequence: str, require_ATG: bool = True, requir
     valid_orfs = []
     for orf_match in all_orfs:
         # Calculate ORF length without splice junction markers
-        clean_orf = re.sub(r'[\^\|\*]', '', orf_match)
+        clean_orf = _CLEAN_MARKS_RE.sub('', orf_match)
         orf_length_codons = len(clean_orf) // 3
         
         if orf_length_codons >= min_ORF_len:
@@ -429,7 +439,7 @@ def insert_marks_for_longset_ORF(sequence: str, require_ATG: bool = True, requir
         start_codon_pos = sequence.find(longest_orf_match)
         
         # Handle marking based on whether stop codon is present/required
-        if require_STOP or re.search(r'(?:\|?T\|?A\|?A|\|?T\|?A\|?G|\|?T\|?G\|?A)$', longest_orf_match, flags=re.IGNORECASE):
+        if require_STOP or _STOP_CODON_END_RE.search(longest_orf_match):
             # Has stop codon or stop required - mark both start and stop
             stop_codon_pos = start_codon_pos + len(longest_orf_match)
             return sequence[0:start_codon_pos] + "^" + longest_orf_match + "*" + sequence[stop_codon_pos:]
@@ -457,7 +467,7 @@ def insert_marks_for_first_ORF(sequence: str, require_STOP: bool = True, min_ORF
         start_codon_pos = first_orf_match.start(1)
         
         # Check if ORF ends with stop codon
-        if require_STOP or re.search(r'(?:\|?T\|?A\|?A|\|?T\|?A\|?G|\|?T\|?G\|?A)$', orf_sequence, flags=re.IGNORECASE):
+        if require_STOP or _STOP_CODON_END_RE.search(orf_sequence):
             # Has stop codon - mark both start and stop
             orf_end_pos = start_codon_pos + len(orf_sequence)
             return sequence[0:start_codon_pos] + "^" + orf_sequence + "*" + sequence[orf_end_pos:]
@@ -581,14 +591,14 @@ def Analyze_uORFs(sequence, bedline, pssm=None):
     uorf_seqs = find_uorfs(sequence)
     if not uorf_seqs:
         return "", "", "", "", "", ""
-    clean_main_start = len(re.sub(r'[\^\|\*]', '', sequence[:main_orf_index]))
+    clean_main_start = len(_CLEAN_MARKS_RE.sub('', sequence[:main_orf_index]))
     starts, stops, classes, lengths, relpos, scores = [], [], [], [], [], []
     for uorf in uorf_seqs:
         uorf_start_marked = sequence.find(uorf)
         uorf_end_marked = uorf_start_marked + len(uorf)
         classification = "uORF" if uorf_end_marked <= main_orf_index else "Overlapping_uORF"
-        clean_start = len(re.sub(r'[\^\|\*]', '', sequence[:uorf_start_marked]))
-        clean_end = len(re.sub(r'[\^\|\*]', '', sequence[:uorf_end_marked])) - 1
+        clean_start = len(_CLEAN_MARKS_RE.sub('',sequence[:uorf_start_marked]))
+        clean_end = len(_CLEAN_MARKS_RE.sub('',sequence[:uorf_end_marked])) - 1
         try:
             gstart = get_absolute_pos(bedline, clean_start)
         except Exception:
@@ -598,7 +608,7 @@ def Analyze_uORFs(sequence, bedline, pssm=None):
         except Exception:
             gstop = None
         relative_position = clean_start - clean_main_start
-        aa_len = len(re.sub(r'[\^\|\*]', '', uorf)) // 3
+        aa_len = len(_CLEAN_MARKS_RE.sub('',uorf)) // 3
         starts.append(str(int(gstart)) if gstart is not None else "")
         stops.append(str(int(gstop)) if gstop is not None else "")
         classes.append(classification)
@@ -634,19 +644,19 @@ def get_NMD_detective_B_classification(sequence: str) -> str:
     """
     sequence should be marked with '^' for start, '*' for stop, and '|' for splice juncs
     """
-    CDS = re.search(r"\^(\w+)\**", sequence.replace("|", ""))
-    InternalStopExon = re.search(r"(^|\|)([\^ACGTNacgtn]*\*[ACGTNacgtn]*)\|", sequence)
+    CDS = _NMD_CDS_RE.search(sequence.replace("|", ""))
+    InternalStopExon = _NMD_INTERNAL_STOP_EXON_RE.search(sequence)
     if "^" not in sequence or CDS == None:
         return "No CDS"
-    elif re.search(r"\^[\w|]+$", sequence):
+    elif _NMD_NO_STOP_RE.search(sequence):
         return "No stop"
-    elif re.search(r"(^|\|)[\^ACGTNacgtn]*\*[ACGTNacgtn]*$", sequence):
+    elif _NMD_LAST_EXON_RE.search(sequence):
         return "Last exon"
     elif len(CDS.group(1)) <= 125:
         return "Start proximal"
     elif InternalStopExon is not None and len(InternalStopExon.group(2)) >= 407:
         return "Long exon"
-    elif re.search(r"\*[ACGTNacgtn]{0,50}\|[ACGTNacgtn]+$", sequence):
+    elif _NMD_50NT_RE.search(sequence):
         return "50 nt rule"
     else:
         return "Trigger NMD"
