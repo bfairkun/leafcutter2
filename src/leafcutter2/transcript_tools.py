@@ -654,7 +654,15 @@ def get_NMD_detective_B_classification_color(NMD_detective_B_classification):
         return "#252525"
 
 def calculate_frames(bedline):
-    """Calculate the frame for each CDS block."""
+    """Return the GTF phase for each CDS block, in genomic (left-to-right) order.
+
+    GTF/GFF column 8 is the *phase*: the number of bases to remove from the
+    start of the block to reach the first base of the next codon. We first
+    accumulate the *frame* (offset of each block's first base within its codon,
+    in translation order) and then convert to phase via phase = (3 - frame) % 3
+    (i.e. 0->0, 1->2, 2->1). This frame/phase distinction is why the conversion
+    below is needed; without it the column-8 values would be wrong.
+    """
     CDS_bed12 = bedline.cds()
     if CDS_bed12:
         frames = []
@@ -670,9 +678,8 @@ def calculate_frames(bedline):
                 frames.insert(0, current_frame)
                 block_length = cds.end - cds.start
                 current_frame = (current_frame + block_length) % 3
-        # Adjusting the frames gets the right answer below. haven't figured out why. but i'm sure it makes the function work.
-        frames = [2 if frame == 1 else 1 if frame == 2 else frame for frame in frames]
-        return frames
+        phases = [(3 - frame) % 3 for frame in frames]
+        return phases
     
 def extract_codon(bedline, codon_type='start'):
     """
