@@ -314,7 +314,6 @@ def AddORF_Marks(sequence, StartMarkBasePosition=None, StopMarkBasePosition=None
     else:
         # start_idx <= stop_idx: insert both
         return sequence[:start_idx] + '^' + sequence[start_idx:stop_idx] + '*' + sequence[stop_idx:]
-AddORF_Marks("||ATG|G|ATAGG", 1, 5)
 
 def extract_sequence(self, fasta_obj, AddMarksForORF=False):
     """
@@ -410,7 +409,6 @@ def insert_marks_for_longset_ORF(sequence, require_ATG=True, require_STOP=True, 
             return sequence[0:start_codon_pos] + "^" + sequence[start_codon_pos:]
     else:
         return sequence
-insert_marks_for_longset_ORF("ggg|ATGATG|aaaCatgCC|TA|A|gggAAACCCAAACCCAAACCCAAAccc", require_ATG=True, require_STOP=True, min_ORF_len=4)
 
 def insert_marks_for_first_ORF(sequence, require_STOP=True, min_ORF_len=0):
     """
@@ -440,16 +438,6 @@ def insert_marks_for_first_ORF(sequence, require_STOP=True, min_ORF_len=0):
     
     # No valid ORF found
     return sequence
-# # should mark at ORF of at least 4 codons (including start and stop)
-# insert_marks_for_first_ORF("ggg|ATG|aaaCCC|TA|A|ggg", require_STOP=True, min_ORF_len=4)
-# # should marks an ORF of at least 4 codons including start and stop
-# insert_marks_for_first_ORF("ggg|ATG|aaaCCC|TA|A|ggg", require_STOP=False, min_ORF_len=4)
-# # should does not mark the ORF of only 3 codons including start and stop
-# insert_marks_for_first_ORF("ggg|ATG|aaa|TA|A|ggg", require_STOP=False, min_ORF_len=4)
-# # should mark an ORF of at least 4 codons without a stop codon
-# insert_marks_for_first_ORF("ggg|ATG|aaaCCC|ggg", require_STOP=False, min_ORF_len=4)
-# # should not mark an ORF, when it is only 2 non-start codons.
-# insert_marks_for_first_ORF("ggg|ATG|aaaCCC|", require_STOP=False, min_ORF_len=4)
 
 
 def insert_marks_for_defined_ORF(sequence, start_codon_pos=None):
@@ -471,8 +459,6 @@ def insert_marks_for_defined_ORF(sequence, start_codon_pos=None):
             return sequence
     else:
         return sequence
-# insert_marks_for_defined_ORF("GGGATGAAAGGGAAA|GGG|T|AA|GGGAAA", 3)
-# insert_marks_for_defined_ORF("GGGATGAAAGGGAAA|GGG|TT|AA|GGGAAA", 3)
 
 def find_uorfs(seq):
     junk = {"|", "^", "*"}
@@ -631,13 +617,6 @@ def get_NMD_detective_B_classification(sequence):
         return "50 nt rule"
     else:
         return "Trigger NMD"
-# get_NMD_detective_B_classification("ACGTACG|CACGT")
-# get_NMD_detective_B_classification("A^ATGACG|CACGT")
-# get_NMD_detective_B_classification("A^CGTACG|CAC*GT")
-# get_NMD_detective_B_classification("A^CGTA*CG|CACGT")
-# get_NMD_detective_B_classification("ACG^TACG|" + "A" * 407 +"A*A|CACGT")
-# get_NMD_detective_B_classification("ACG^TA" + "A" * 100 + "CG|" + "A" * 40 +"A*A|CACGT")
-# get_NMD_detective_B_classification("ACG^TA" + "A" * 150 + "CG|A*" + "A"*60 + "|CACGT")
 
 def get_NMD_detective_B_classification_number(NMD_detective_B_classification):
     OrdinalDict = {"Last exon":1,"Start proximal":2,"50 nt rule":3, "Long exon":4,"Trigger NMD":5, "No stop":6, "No CDS":7}
