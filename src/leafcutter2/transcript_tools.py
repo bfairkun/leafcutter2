@@ -976,6 +976,66 @@ def _open_bgzip_aware(path, text_mode=True):
     # fallback to regular open
     return open(path, 'w' if text_mode else 'wb')
 
+
+def _init_kozak_pssm(args):
+    """Build the Kozak PSSM once: from a JASPAR PFM if provided, otherwise from
+    the built-in empirical counts. Returns the PSSM, or None on failure."""
+    try:
+        if args.kozak_jaspar_pfm:
+            _, pssm = load_jaspar_pfm_pssm(args.kozak_jaspar_pfm)
+            logging.info(f"Loaded Kozak PFM from {args.kozak_jaspar_pfm}")
+            return pssm
+        counts_dict = {
+            'A': [3620.0, 3166.0, 4450.0, 8952.0, 5277.0, 3288.0, 18870.0, 0.0, 2.0, 3973.0],
+            'C': [4423.0, 6320.0, 7562.0, 1691.0, 7700.0, 8999.0, 25.0, 3.0, 0.0, 2652.0],
+            'G': [7701.0, 5952.0, 4862.0, 7331.0, 3652.0, 5302.0, 2.0, 0.0, 18895.0, 9712.0],
+            'T': [3155.0, 3461.0, 2025.0, 925.0, 2270.0, 1310.0, 2.0, 18896.0, 2.0, 2562.0],
+        }
+        _, _, pssm = build_pssm_from_counts_by_sampling(counts_dict, n_instances=800, seed=1)
+        return pssm
+    except Exception as e:
+        logging.error(f"Failed to initialize Kozak PSSM: {e}")
+        return None
+
+
+def _load_input_records(args, extra_attributes):
+    """Read input transcripts into a BED12 string (one transcript per line).
+
+    For GTF input, runs `bedparse gtf2bed` with the required and extra
+    attributes as extra fields. For BED12 input, reads the file (optionally only
+    the first n lines) and validates the requested column indexes.
+    """
+    if args.input_type == "gtf":
+        required_attributes = [args.transcript_id_attribute_name, args.gene_id_attribute_name]
+        required_attributes.extend([args.transcript_type_attribute_name, args.gene_type_attribute_name])
+        attributes_to_extract = ','.join(required_attributes + extra_attributes)
+        logging.info('Reading in transcripts and converting transcripts to bedparse.bedline objects...')
+        return run_bedparse_gtf2bed(args.transcripts_in, '--extraFields', attributes_to_extract, n=args.n_lines)
+
+    # input_type == "bed12"
+    logging.info(f'Reading BED12 input with column mapping: {args.bed12_column_indexes}')
+    open_func = gzip.open if args.transcripts_in.endswith('.gz') else open
+    mode = 'rt' if args.transcripts_in.endswith('.gz') else 'r'
+    if args.n_lines is not None:
+        bed12_lines = []
+        with open_func(args.transcripts_in, mode) as f:
+            for i, line in enumerate(f):
+                if i >= args.n_lines:
+                    break
+                bed12_lines.append(line.rstrip('\n'))
+        bed12 = '\n'.join(bed12_lines)
+        logging.info(f'Reading first {args.n_lines} lines from BED12 file')
+    else:
+        with open_func(args.transcripts_in, mode) as f:
+            bed12 = f.read()
+    first_line = bed12.split('\n')[0].split('\t')
+    max_col_needed = max(args.bed12_column_indexes)
+    if len(first_line) < max_col_needed:
+        raise ValueError(f"BED12 file has {len(first_line)} columns but column index {max_col_needed} was specified")
+    logging.info(f"BED12 column mapping: transcript_id=col{args.bed12_column_indexes[0]}, gene_id=col{args.bed12_column_indexes[1]}, transcript_type=col{args.bed12_column_indexes[2]}, gene_type=col{args.bed12_column_indexes[3]}")
+    return bed12
+
+
 def main(args=None):
     args = parse_args(args)
     setup_logging(args.verbose)
@@ -1013,49 +1073,9 @@ def main(args=None):
     # Open the FASTA file using pyfastx
     fasta_obj = pyfastx.Fasta(args.fasta_in)
 
-    # Handle attribute extraction based on input type and inference approaches
-    if args.input_type == "gtf":
-        # Build attributes to extract - handle missing transcript_type/gene_type gracefully
-        required_attributes = [args.transcript_id_attribute_name, args.gene_id_attribute_name]
-        
-        # Always try to extract type attributes (user's responsibility to use inference approaches)
-        required_attributes.extend([args.transcript_type_attribute_name, args.gene_type_attribute_name])
-        
-        attributes_to_extract = ','.join(required_attributes + extra_attributes)
-        
-        # gtf2bed
-        logging.info(f'Reading in transcripts and converting transcripts to bedparse.bedline objects...')
-        bed12 = run_bedparse_gtf2bed(args.transcripts_in, '--extraFields', attributes_to_extract, n=args.n_lines)
-        
-    elif args.input_type == "bed12":
-        logging.info(f'Reading BED12 input with column mapping: {args.bed12_column_indexes}')
-        
-        # Handle -n argument for BED12 input with gzip auto-detection
-        if args.n_lines is not None:
-            bed12_lines = []
-            open_func = gzip.open if args.transcripts_in.endswith('.gz') else open
-            mode = 'rt' if args.transcripts_in.endswith('.gz') else 'r'
-            with open_func(args.transcripts_in, mode) as f:
-                for i, line in enumerate(f):
-                    if i >= args.n_lines:
-                        break
-                    bed12_lines.append(line.rstrip('\n'))
-            bed12 = '\n'.join(bed12_lines)
-            logging.info(f'Reading first {args.n_lines} lines from BED12 file')
-        else:
-            open_func = gzip.open if args.transcripts_in.endswith('.gz') else open
-            mode = 'rt' if args.transcripts_in.endswith('.gz') else 'r'
-            with open_func(args.transcripts_in, mode) as f:
-                bed12 = f.read()
-        
-        # Validate column indexes against actual BED12 data
-        first_line = bed12.split('\n')[0].split('\t')
-        max_col_needed = max(args.bed12_column_indexes)
-        if len(first_line) < max_col_needed:
-            raise ValueError(f"BED12 file has {len(first_line)} columns but column index {max_col_needed} was specified")
-        
-        logging.info(f"BED12 column mapping: transcript_id=col{args.bed12_column_indexes[0]}, gene_id=col{args.bed12_column_indexes[1]}, transcript_type=col{args.bed12_column_indexes[2]}, gene_type=col{args.bed12_column_indexes[3]}")
-        
+    # Read input transcripts into a BED12 string (one transcript per line).
+    bed12 = _load_input_records(args, extra_attributes)
+
     NumTrancsripts = len(bed12.splitlines())
     logging.info(f'Read in {NumTrancsripts} from input.')
 
@@ -1101,23 +1121,7 @@ def main(args=None):
             bed_out_fh.write(bed_header_line)
 
     # Initialize Kozak PSSM once (override with JASPAR if provided)
-    pssm = None
-    try:
-        if args.kozak_jaspar_pfm:
-            _, pssm = load_jaspar_pfm_pssm(args.kozak_jaspar_pfm)
-            logging.info(f"Loaded Kozak PFM from {args.kozak_jaspar_pfm}")
-        else:
-            # Use your empirical counts to synthesize instances and build PSSM
-            counts_dict = {
-                'A': [3620.0, 3166.0, 4450.0, 8952.0, 5277.0, 3288.0, 18870.0, 0.0, 2.0, 3973.0],
-                'C': [4423.0, 6320.0, 7562.0, 1691.0, 7700.0, 8999.0, 25.0, 3.0, 0.0, 2652.0],
-                'G': [7701.0, 5952.0, 4862.0, 7331.0, 3652.0, 5302.0, 2.0, 0.0, 18895.0, 9712.0],
-                'T': [3155.0, 3461.0, 2025.0, 925.0, 2270.0, 1310.0, 2.0, 18896.0, 2.0, 2562.0],
-            }
-            _, _, pssm = build_pssm_from_counts_by_sampling(counts_dict, n_instances=800, seed=1)
-    except Exception as e:
-        logging.error(f"Failed to initialize Kozak PSSM: {e}")
-        pssm = None
+    pssm = _init_kozak_pssm(args)
 
     for i,l in enumerate(bed12.splitlines()):
         if i >= 0:
