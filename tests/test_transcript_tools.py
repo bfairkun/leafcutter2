@@ -7,7 +7,20 @@ fixtures do not trigger.
 
 import types
 
+import bedparse
+
 from leafcutter2 import transcript_tools as tt
+
+
+def _make_tx(strand, cds_start=0, cds_end=250):
+    """3 exons x 50bp with 50bp introns; CDS span configurable.
+
+    BED fields: chr start end name score strand cdsStart cdsEnd color nEx
+    exLengths exStarts. Exons span genomic 0-50, 100-150, 200-250 (tx length 150).
+    """
+    return bedparse.bedline(
+        ["chr1", 0, 250, "tx", 0, strand, cds_start, cds_end, 0, 3, "50,50,50", "0,100,200"]
+    )
 
 
 # ── A5: Is_bedline_complete robustness ─────────────────────────────────────
@@ -74,3 +87,64 @@ def test_nmd_does_not_crash_on_guarded_branch():
     # branch and crash. Must return a string, not raise.
     seq = "ACG^T" + "A" * 200 + "*" + "A" * 60 + "|CACGT"
     assert isinstance(tt.get_NMD_detective_B_classification(seq), str)
+
+
+# ── C5: calculate_frames (GTF phase) for both strands ──────────────────────
+
+def test_calculate_frames_plus_strand():
+    # 3 CDS blocks of 50nt each; phase of the first translated block is 0.
+    assert tt.calculate_frames(_make_tx("+")) == [0, 1, 2]
+
+
+def test_calculate_frames_minus_strand():
+    # Genomic order; the 3'-most genomic block is the translation start (phase 0).
+    assert tt.calculate_frames(_make_tx("-")) == [2, 1, 0]
+
+
+def test_calculate_frames_translation_start_phase_zero():
+    plus = tt.calculate_frames(_make_tx("+"))
+    minus = tt.calculate_frames(_make_tx("-"))
+    assert plus[0] == 0          # + strand: first genomic block starts translation
+    assert minus[-1] == 0        # - strand: last genomic block starts translation
+    assert all(p in (0, 1, 2) for p in plus + minus)
+
+
+# ── C5: extract_codon places 3bp at the correct genomic end per strand ─────
+
+def test_extract_codon_plus_strand():
+    bl = _make_tx("+")
+    start = tt.extract_codon(bl, "start")
+    stop = tt.extract_codon(bl, "stop")
+    assert (start.start, start.end) == (0, 3)        # 5' genomic end
+    assert (stop.start, stop.end) == (247, 250)      # 3' genomic end
+
+
+def test_extract_codon_minus_strand():
+    bl = _make_tx("-")
+    start = tt.extract_codon(bl, "start")
+    stop = tt.extract_codon(bl, "stop")
+    assert (start.start, start.end) == (247, 250)    # start is at higher genomic coord
+    assert (stop.start, stop.end) == (0, 3)
+
+
+def test_extract_codon_requires_cds():
+    # transcript with no CDS (cdsStart == cdsEnd) -> ValueError
+    import pytest
+    bl = bedparse.bedline(["chr1", 0, 250, "tx", 0, "+", 0, 0, 0, 3, "50,50,50", "0,100,200"])
+    with pytest.raises(ValueError):
+        tt.extract_codon(bl, "start")
+
+
+# ── C5: get_absolute_pos transcript->genomic mapping ───────────────────────
+
+def test_get_absolute_pos_plus_strand():
+    bl = _make_tx("+")
+    assert tt.get_absolute_pos(bl, 0) == 0          # first tx base -> 5' genomic
+    assert tt.get_absolute_pos(bl, 149) == 249      # last tx base -> 3' genomic
+
+
+def test_get_absolute_pos_minus_strand_monotonic_decreasing():
+    # On the minus strand, increasing transcript coordinate maps to decreasing
+    # genomic coordinate.
+    bl = _make_tx("-")
+    assert tt.get_absolute_pos(bl, 0) > tt.get_absolute_pos(bl, 149)
