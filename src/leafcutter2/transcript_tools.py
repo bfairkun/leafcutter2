@@ -1160,6 +1160,12 @@ def main(args=None):
             transcript = bedparse.bedline(lsplit[0:12])
             if not Is_bedline_complete(transcript):
                 continue
+            # Cache cds()/utr() on the input transcript: bedparse recomputes them
+            # on each call, and the translation-approach conditionals below query
+            # them repeatedly.
+            tx_cds = transcript.cds()
+            tx_utr5 = transcript.utr(which=5)
+            tx_utr3 = transcript.utr(which=3)
             source = "input_gtf"
             transcript_attributes = f'transcript_id "{transcript_id}"; gene_id "{gene_id}";'
             transcript_out = transcript
@@ -1168,15 +1174,15 @@ def main(args=None):
             # restricted to A-F by argparse choices, so every path below assigns
             # `sequence` and `NMDFinderB`; no fallback catch is needed.
             if args.translation_approach == 'A':
-                if transcript.cds() and transcript.utr(which=5) and transcript.utr(which=3):
+                if tx_cds and tx_utr5 and tx_utr3:
                     source = "input_gtf"
                     sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
-                elif transcript.cds() and transcript.utr(which=5) and not transcript.utr(which=3):
+                elif tx_cds and tx_utr5 and not tx_utr3:
                     source = "LongestORF_NoStopRequired"
                     sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
                     thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
                     transcript_out = bedparse.bedline([transcript.chr, transcript.start, transcript.end, transcript.name, transcript.score, transcript.strand, thickStart, thickStop, transcript.color, transcript.nEx, transcript.exLengths, transcript.exStarts])
-                elif transcript.cds() and not transcript.utr(which=5) and transcript.utr(which=3):
+                elif tx_cds and not tx_utr5 and tx_utr3:
                     source = "LongestORF_NoStartRequired"
                     sequence = insert_marks_for_longset_ORF(transcript.extract_sequence(fasta_obj), require_STOP = False)
                     thickStart, thickStop = get_thickStart_thickStop_from_marked_seq(transcript, sequence)
@@ -1191,7 +1197,7 @@ def main(args=None):
                 sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
                 NMDFinderB = get_NMD_detective_B_classification(sequence)
             elif args.translation_approach == 'C':
-                if transcript.cds():
+                if tx_cds:
                     sequence = transcript.extract_sequence(fasta_obj, AddMarksForORF=True)
                     source = "input_gtf"
                 else:
@@ -1224,7 +1230,7 @@ def main(args=None):
             if args.infer_transcript_type_approach == 'A':
                 transcript_type_out = transcript_type
             elif args.infer_transcript_type_approach == 'B':
-                transcript_type_out = "protein_coding" if transcript.cds() else "noncoding"
+                transcript_type_out = "protein_coding" if tx_cds else "noncoding"
             elif  args.infer_transcript_type_approach == 'C':
                 transcript_type_out = "protein_coding" if NMDFinderB_number < args.NMDetectiveB_coding_threshold else "noncoding"
             # Build all transcript attributes in one place
