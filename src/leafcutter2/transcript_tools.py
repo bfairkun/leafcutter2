@@ -793,7 +793,7 @@ def gtf_formatted_bedline_cds(bedline, source='.', attributes_str=''):
     if bedline.cds():
         for cds, frame in zip(bedline.cds().bed12tobed6(), calculate_frames(bedline)):
             gtf_fields = [cds.chr, source, 'CDS', str(cds.start + 1), str(cds.end), str(cds.score), cds.strand, str(frame), attributes_str]
-            string_to_return += '\t'.join(gtf_fields) + attributes_str + '\n'
+            string_to_return += '\t'.join(gtf_fields) + '\n'
     return string_to_return
 
 
